@@ -13,6 +13,8 @@ interface OIAnalysisResult {
   label: string; // 标签
   description: string; // 描述
   status: 'healthy' | 'danger' | 'opportunity' | 'accumulation' | 'crash';
+  dataSource?: string; // 数据来源（用于调试）
+  isRealOI?: boolean; // 是否为真实OI数据
 }
 
 // OI趋势分析逻辑
@@ -118,67 +120,103 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       }
     }
 
-    // 2. 获取OI数据 - 尝试多个API端点
+    // 2. 获取真实的OI数据 - 使用Binance的openInterest API
     let oiChangePercent = 0;
     let oiDataSuccess = false;
+    let oiDataSource = 'unknown'; // 记录数据来源，用于调试
 
-    // 方法1: 使用topLongShortAccountRatio（这个API更可靠，在Vercel上也能正常工作）
+    // 方法1: 获取当前OI，然后通过对比历史K线数据估算变化
+    // 这是最可靠的方法，因为openInterest API是公开的
     try {
-      const ratioRes = await fetchWithTimeout(
-        `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
+      // 获取当前OI
+      const currentOIRes = await fetchWithTimeout(
+        `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
         {
-          timeout: 8000, // 增加超时时间
+          timeout: 10000, // 增加到10秒，确保在Vercel上有足够时间
           next: { revalidate: 60 },
         }
       );
 
-      if (ratioRes.ok) {
-        const ratioData = await ratioRes.json();
+      if (currentOIRes.ok) {
+        const currentOIData: any = await currentOIRes.json();
+        const currentOI = parseFloat(currentOIData.openInterest || 0);
         
-        if (Array.isArray(ratioData) && ratioData.length >= 2) {
-          const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
-          const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
+        if (currentOI > 0) {
+          // 尝试获取历史OI数据（通过openInterestHistory API）
+          try {
+            const historyOIRes = await fetchWithTimeout(
+              `https://fapi.binance.com/futures/data/openInterestHistory?symbol=${symbol}&period=${period}&limit=2`,
+              {
+                timeout: 10000,
+                next: { revalidate: 60 },
+              }
+            );
+            
+            if (historyOIRes.ok) {
+              const historyData: any = await historyOIRes.json();
+              if (Array.isArray(historyData) && historyData.length >= 2) {
+                const previousOI = parseFloat(historyData[1].sumOpenInterest || historyData[1].openInterest || 0);
+                if (previousOI > 0) {
+                  oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
+                  oiDataSuccess = true;
+                  oiDataSource = 'openInterestHistory';
+                  console.log(`✅ 方法1成功（真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+                }
+              } else {
+                console.log(`方法1: 历史OI数据格式错误`, historyData);
+              }
+            } else {
+              console.log(`方法1: 历史OI API返回错误 ${historyOIRes.status}`);
+            }
+          } catch (e2: any) {
+            console.log(`方法1: 无法获取历史OI数据: ${e2.message}`);
+          }
           
-          if (previousRatio > 0 && currentRatio > 0) {
-            // 使用多空账户比例的变化作为OI变化的近似值
-            oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
+          // 如果历史数据不可用，尝试使用当前OI和价格变化来估算
+          // 这是一个近似方法，但比完全猜测要好
+          if (!oiDataSuccess && Math.abs(priceChangePercent) > 0.1) {
+            // 如果价格有明显变化，假设OI也有相应变化（但幅度可能不同）
+            // 这是一个经验值，可以根据实际情况调整
+            oiChangePercent = priceChangePercent * 0.5; // 价格变化50%的幅度
             oiDataSuccess = true;
-            console.log(`方法1成功: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
-          } else {
-            console.log(`方法1: 比例数据无效 current=${currentRatio}, previous=${previousRatio}`);
+            oiDataSource = 'estimated_from_price';
+            console.log(`⚠️ 方法1: 使用价格变化估算OI: ${period}周期 估算OI变化 ${oiChangePercent.toFixed(2)}%`);
           }
         } else {
-          console.log(`方法1: 返回数据不是数组或长度不足`, ratioData);
+          console.log(`方法1: 当前OI为0或无效`);
         }
       } else {
-        console.log(`方法1: API返回错误 ${ratioRes.status} ${ratioRes.statusText}`);
+        console.log(`方法1: 当前OI API返回错误 ${currentOIRes.status} ${currentOIRes.statusText}`);
       }
     } catch (e: any) {
       console.log(`方法1失败: ${e.message}`);
     }
 
-    // 方法2: 如果方法1失败，尝试使用globalLongShortAccountRatio（全球多空比）
+    // 方法2: 如果方法1失败，尝试使用topLongShortAccountRatio作为替代
+    // 这不是真正的OI，但可以反映市场情绪变化
     if (!oiDataSuccess) {
       try {
-        const globalRatioRes = await fetchWithTimeout(
-          `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
+        const ratioRes = await fetchWithTimeout(
+          `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
           {
-            timeout: 8000,
+            timeout: 10000,
             next: { revalidate: 60 },
           }
         );
 
-        if (globalRatioRes.ok) {
-          const globalRatioData = await globalRatioRes.json();
+        if (ratioRes.ok) {
+          const ratioData = await ratioRes.json();
           
-          if (Array.isArray(globalRatioData) && globalRatioData.length >= 2) {
-            const currentRatio = parseFloat(globalRatioData[0].longShortRatio || 0);
-            const previousRatio = parseFloat(globalRatioData[1].longShortRatio || 0);
+          if (Array.isArray(ratioData) && ratioData.length >= 2) {
+            const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
+            const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
             
             if (previousRatio > 0 && currentRatio > 0) {
+              // 使用多空账户比例的变化作为OI变化的近似值
               oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
               oiDataSuccess = true;
-              console.log(`方法2成功: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+              oiDataSource = 'topLongShortRatio';
+              console.log(`⚠️ 方法2（近似OI）: ${period}周期 多空比变化 ${oiChangePercent.toFixed(2)}%`);
             }
           }
         }
@@ -190,10 +228,11 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     // 方法3: 如果前两种方法都失败，使用价格变化作为最后的fallback
     // 这不是真正的OI，但至少可以显示一些分析结果
     if (!oiDataSuccess) {
-      console.log(`所有OI获取方法都失败，使用价格变化作为fallback`);
+      console.log(`⚠️ 所有真实OI获取方法都失败，使用价格变化作为fallback`);
       // 使用价格变化的30%作为OI变化的近似值（这是一个非常粗略的估计）
       oiChangePercent = priceChangePercent * 0.3;
-      oiDataSuccess = true; // 至少返回一些数据，而不是null
+      oiDataSuccess = true;
+      oiDataSource = 'price_fallback';
     }
 
     // 3. 分析趋势（即使数据都是0，也返回分析结果）
@@ -202,6 +241,9 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     return {
       period,
       ...analysis,
+      // 添加数据来源标记，让前端知道这是真实数据还是估算数据
+      dataSource: oiDataSource,
+      isRealOI: oiDataSource === 'openInterestHistory',
     };
   } catch (error: any) {
     console.error(`获取${period} OI分析失败:`, error.message);

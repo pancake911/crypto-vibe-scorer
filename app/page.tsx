@@ -242,16 +242,22 @@ export default function Home() {
       console.log('🚀 开始客户端直接调用Binance API获取真实OI数据...', fullSymbol);
       
       // 并行获取价格和OI数据
-      console.log('开始并行获取数据...', fullSymbol);
+      // 使用服务器代理端点，绕过CORS限制
+      console.log('开始并行获取数据（通过服务器代理）...', fullSymbol);
       const [price1hRes, price4hRes, oi1hRes, oi4hRes] = await Promise.allSettled([
-        // 1小时价格
-        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=1h&limit=2`),
+        // 1小时价格（直接调用，因为价格API通常支持CORS）
+        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=1h&limit=2`).catch(() => 
+          // 如果直接调用失败，使用代理
+          fetch(`/api/oi-analysis-client?symbol=${fullSymbol}&period=1h&type=price`)
+        ),
         // 4小时价格
-        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=4h&limit=2`),
-        // 1小时OI历史
-        fetch(`https://fapi.binance.com/futures/data/openInterestHistory?symbol=${fullSymbol}&period=1h&limit=2`),
+        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=4h&limit=2`).catch(() =>
+          fetch(`/api/oi-analysis-client?symbol=${fullSymbol}&period=4h&type=price`)
+        ),
+        // 1小时OI历史（使用服务器代理，绕过CORS）
+        fetch(`/api/oi-analysis-client?symbol=${fullSymbol}&period=1h&type=oi`),
         // 4小时OI历史
-        fetch(`https://fapi.binance.com/futures/data/openInterestHistory?symbol=${fullSymbol}&period=4h&limit=2`),
+        fetch(`/api/oi-analysis-client?symbol=${fullSymbol}&period=4h&type=oi`),
       ]);
 
       console.log('数据获取结果:', {
@@ -273,8 +279,17 @@ export default function Home() {
             console.log('1h OI API返回错误:', oi1hRes.value.status, oi1hRes.value.statusText);
           }
           
-          const priceData = await price1hRes.value.json();
-          const oiData = await oi1hRes.value.json();
+          const priceResponse = await price1hRes.value.json();
+          const oiResponse = await oi1hRes.value.json();
+          
+          // 处理代理返回的数据格式
+          const priceData = Array.isArray(priceResponse) ? priceResponse : (priceResponse.data || priceResponse);
+          let oiData = Array.isArray(oiResponse) ? oiResponse : (oiResponse.data || oiResponse);
+          
+          // 如果代理返回的是包装格式 {success: true, data: [...]}
+          if (oiResponse && oiResponse.success && oiResponse.data) {
+            oiData = oiResponse.data;
+          }
           
           console.log('1h数据解析:', {
             priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',
@@ -356,13 +371,19 @@ export default function Home() {
           // 检查响应状态
           if (!price4hRes.value.ok) {
             console.log('4h价格API返回错误:', price4hRes.value.status, price4hRes.value.statusText);
+            throw new Error('Price API failed');
           }
           if (!oi4hRes.value.ok) {
             console.log('4h OI API返回错误:', oi4hRes.value.status, oi4hRes.value.statusText);
+            throw new Error('OI API failed');
           }
           
-          const priceData = await price4hRes.value.json();
-          const oiData = await oi4hRes.value.json();
+          const priceResponse = await price4hRes.value.json();
+          const oiResponse = await oi4hRes.value.json();
+          
+          // 处理代理返回的数据格式
+          const priceData = Array.isArray(priceResponse) ? priceResponse : (priceResponse.data || priceResponse);
+          const oiData = Array.isArray(oiResponse) ? oiResponse : (oiResponse.data || oiResponse);
           
           console.log('4h数据解析:', {
             priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',

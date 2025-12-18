@@ -1,45 +1,104 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
-// 客户端直接调用Binance API的代理端点
-// 这个端点只做简单的转发，不进行复杂处理，避免被限制
+// 客户端通过服务器代理获取OI数据的端点
+// 虽然服务器端直接调用可能被限制，但作为代理可能可以工作
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const url = searchParams.get('url'); // Binance API的完整URL
+    const symbol = searchParams.get('symbol'); // 例如: BTCUSDT
+    const period = searchParams.get('period'); // 例如: 1h, 4h
+    const type = searchParams.get('type'); // 'price' 或 'oi'
     
-    if (!url || !url.startsWith('https://fapi.binance.com/')) {
+    if (!symbol || !period || !type) {
       return NextResponse.json(
-        { success: false, error: 'Invalid URL' },
+        { success: false, error: 'Missing required parameters: symbol, period, type' },
         { status: 400 }
       );
     }
 
-    // 添加User-Agent等请求头
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-      },
-      next: { revalidate: 60 },
-    });
-
-    if (!response.ok) {
+    let url = '';
+    if (type === 'price') {
+      // 获取价格数据
+      const interval = period === '1h' ? '1h' : '4h';
+      url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=2`;
+    } else if (type === 'oi') {
+      // 获取OI历史数据
+      url = `https://fapi.binance.com/futures/data/openInterestHistory?symbol=${symbol}&period=${period}&limit=2`;
+    } else {
       return NextResponse.json(
-        { success: false, error: `API returned ${response.status}`, status: response.status },
-        { status: response.status }
+        { success: false, error: 'Invalid type. Must be "price" or "oi"' },
+        { status: 400 }
       );
     }
 
-    const data = await response.json();
-    
-    return NextResponse.json(
-      { success: true, data },
-      {
-        headers: {
-          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
-        },
+    // 尝试使用fetchWithTimeout（带User-Agent）
+    try {
+      const response = await fetchWithTimeout(url, {
+        timeout: 10000,
+        next: { revalidate: 60 },
+      });
+
+      if (!response.ok) {
+        // 如果返回451，尝试使用不同的方法
+        if (response.status === 451 && type === 'oi') {
+          // 尝试使用openInterest API获取当前OI，然后通过其他方式估算变化
+          const currentOIRes = await fetchWithTimeout(
+            `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
+            {
+              timeout: 10000,
+              next: { revalidate: 60 },
+            }
+          );
+          
+          if (currentOIRes.ok) {
+            const currentOIData: any = await currentOIRes.json();
+            // 返回当前OI，让客户端知道至少获取到了当前值
+            return NextResponse.json(
+              { 
+                success: true, 
+                data: [{
+                  openInterest: currentOIData.openInterest,
+                  timestamp: Date.now(),
+                }],
+                note: 'Only current OI available, historical data blocked',
+              },
+              {
+                headers: {
+                  'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+                },
+              }
+            );
+          }
+        }
+        
+        return NextResponse.json(
+          { success: false, error: `API returned ${response.status}`, status: response.status },
+          { status: response.status }
+        );
       }
-    );
+
+      const data = await response.json();
+      
+      return NextResponse.json(
+        { success: true, data },
+        {
+          headers: {
+            'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+            'Access-Control-Allow-Origin': '*', // 允许跨域
+          },
+        }
+      );
+    } catch (error: any) {
+      console.error('Proxy fetch error:', error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.message || 'Proxy request failed',
+        },
+        { status: 500 }
+      );
+    }
   } catch (error: any) {
     console.error('Client proxy error:', error);
     return NextResponse.json(

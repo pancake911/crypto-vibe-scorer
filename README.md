@@ -130,9 +130,32 @@ npm run build
 vercel deploy
 ```
 
+**重要提示**：
+- 部署后，使用**生产URL**（格式：`https://你的项目名.vercel.app`）分享给他人
+- 不要使用预览URL（格式：`https://xxx-git-main-xxx.vercel.app`），预览URL可能需要登录
+- 在Vercel Dashboard中，确保项目设置为 "Public"（公开）
+- 确保 "Production Branch" 设置为 `main`
+
 ### 其他平台
 
 项目是标准的Next.js应用，可以部署到任何支持Next.js的平台。
+
+### 本地部署（推荐用于获取真实OI数据）
+
+由于Vercel部署时OI数据可能被限制，建议本地运行：
+
+```bash
+# 安装依赖（第一次运行）
+npm install
+
+# 启动开发服务器
+npm run dev
+
+# 局域网访问（允许同一网络内的设备访问）
+npm run dev:network
+```
+
+详细说明请查看：`本地部署和分享方案.md`
 
 ## 许可证
 

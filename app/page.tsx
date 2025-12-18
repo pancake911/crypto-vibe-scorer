@@ -193,12 +193,17 @@ export default function Home() {
       const data = await response.json();
       
       if (data.success && data.data) {
-        // 检查是否获取到了真实OI数据
-        const hasRealOI = data.data['1h']?.isRealOI || data.data['4h']?.isRealOI;
+        // 检查是否获取到了数据（包括估算数据）
+        // 只要dataSource不是'failed'，就认为有数据（即使是估算的）
+        const hasData1h = data.data['1h'] && data.data['1h'].dataSource !== 'failed';
+        const hasData4h = data.data['4h'] && data.data['4h'].dataSource !== 'failed';
+        const hasAnyData = hasData1h || hasData4h;
         const allFailed = data.data['1h']?.dataSource === 'failed' && data.data['4h']?.dataSource === 'failed';
         
         console.log('🔍 服务器端响应检查:', {
-          hasRealOI,
+          hasData1h,
+          hasData4h,
+          hasAnyData,
           allFailed,
           '1h_dataSource': data.data['1h']?.dataSource,
           '4h_dataSource': data.data['4h']?.dataSource,
@@ -206,17 +211,22 @@ export default function Home() {
           '4h_isRealOI': data.data['4h']?.isRealOI,
         });
         
-        // 如果服务器端失败或没有真实OI数据，强制使用客户端调用
-        if (allFailed || !hasRealOI) {
-          // 服务器端失败，尝试客户端直接调用（不设置服务器端数据，等待客户端结果）
-          console.log('⚠️ 服务器端API被限制，强制使用客户端直接调用Binance API...');
+        // 如果服务器端有数据（即使是估算的），就使用服务器端数据
+        // 只有在完全失败（allFailed）时才尝试客户端调用
+        if (allFailed) {
+          // 服务器端完全失败，尝试客户端直接调用（不设置服务器端数据，等待客户端结果）
+          console.log('⚠️ 服务器端API完全失败，尝试客户端直接调用Binance API...');
           // 不设置服务器端数据，直接调用客户端
           await fetchOIAnalysisClientDirect(fullSymbol);
           // 注意：fetchOIAnalysisClientDirect 内部会调用 setOiAnalysis
-        } else {
-          // 服务器端成功，使用服务器端数据
-          console.log('✅ 服务器端成功，使用服务器端数据');
+        } else if (hasAnyData) {
+          // 服务器端有数据（包括估算数据），使用服务器端数据
+          console.log('✅ 服务器端有数据，使用服务器端数据（可能是估算数据）');
           setOiAnalysis(data.data);
+        } else {
+          // 没有数据，尝试客户端调用
+          console.log('⚠️ 服务器端没有数据，尝试客户端直接调用...');
+          await fetchOIAnalysisClientDirect(fullSymbol);
         }
       } else {
         // 服务器端完全失败，尝试客户端直接调用

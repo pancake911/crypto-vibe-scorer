@@ -481,26 +481,12 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     if (!oiDataSuccess) {
       console.log(`❌ 所有真实OI获取方法都失败，使用价格变化估算OI`);
       // 使用价格变化的30%作为OI变化的估算值
-      if (priceChangePercent !== 0) {
-        oiChangePercent = priceChangePercent * 0.3;
-        oiDataSuccess = true;
-        oiDataSource = 'price_estimated_fallback';
-        isRealOI = false;
-        console.log(`⚠️ 使用价格变化作为fallback估算OI: ${period}周期 估算OI变化 ${oiChangePercent.toFixed(2)}%`);
-      } else {
-        // 如果连价格变化都没有，返回错误信息
-        return {
-          period,
-          priceChange: priceChangePercent,
-          oiChange: 0,
-          score: 0,
-          label: '⚠️ 无法获取数据',
-          description: '所有数据源都被限制，无法获取价格和OI数据。已尝试：Hyperliquid API、Binance公共API、Bybit API、Binance标准API。',
-          status: 'healthy',
-          dataSource: 'failed',
-          isRealOI: false,
-        };
-      }
+      // 即使价格变化为0，也至少返回0%的OI变化，而不是返回failed
+      oiChangePercent = priceChangePercent * 0.3;
+      oiDataSuccess = true;
+      oiDataSource = 'price_estimated_fallback';
+      isRealOI = false;
+      console.log(`⚠️ 使用价格变化作为fallback估算OI: ${period}周期 估算OI变化 ${oiChangePercent.toFixed(2)}%`);
     }
 
     // 判断是否为真实OI数据（已经在上面设置，这里不再重复判断）

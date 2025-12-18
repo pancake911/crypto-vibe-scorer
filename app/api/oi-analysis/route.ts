@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
-// 使用Edge Runtime（注意：Edge Runtime不支持某些Node.js API，但fetch和基本操作都支持）
-// export const runtime = 'edge'; // 暂时注释，因为OI分析可能需要更多时间
+// 不使用Edge Runtime，因为需要多次API调用，Node.js runtime更稳定
+// export const runtime = 'edge';
 
 // OI趋势分析结果接口
 interface OIAnalysisResult {
@@ -120,88 +120,65 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     let oiChangePercent = 0;
     let oiDataSuccess = false;
 
-    // 方法1: 尝试使用openInterest API（获取当前OI，然后与历史对比）
+    // 方法1: 使用topLongShortAccountRatio（这个API更可靠，在Vercel上也能正常工作）
     try {
-      // 先获取当前OI
-      const currentOIRes = await fetchWithTimeout(
-        `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
+      const ratioRes = await fetchWithTimeout(
+        `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
         {
-          timeout: 5000,
+          timeout: 8000, // 增加超时时间
           next: { revalidate: 60 },
         }
       );
 
-      if (currentOIRes.ok) {
-        const currentOIData: any = await currentOIRes.json();
-        const currentOI = parseFloat(currentOIData.openInterest || 0);
+      if (ratioRes.ok) {
+        const ratioData = await ratioRes.json();
         
-        if (currentOI > 0) {
-          // 尝试获取历史OI数据（使用openInterestHistory，如果可用）
-          // 如果不可用，我们使用价格变化来估算（这不是真正的OI，但可以作为替代）
-          try {
-            const historyOIRes = await fetchWithTimeout(
-              `https://fapi.binance.com/futures/data/openInterestHistory?symbol=${symbol}&period=${period}&limit=2`,
-              {
-                timeout: 5000,
-                next: { revalidate: 60 },
-              }
-            );
-            
-            if (historyOIRes.ok) {
-              const historyData: any = await historyOIRes.json();
-              if (Array.isArray(historyData) && historyData.length >= 2) {
-                const previousOI = parseFloat(historyData[1].sumOpenInterest || historyData[1].openInterest || 0);
-                if (previousOI > 0) {
-                  oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
-                  oiDataSuccess = true;
-                }
-              }
-            }
-          } catch (e2: any) {
-            // 如果历史数据不可用，使用价格变化作为近似值（这不是真正的OI，但可以反映趋势）
-            console.log(`无法获取历史OI，使用价格变化作为近似: ${e2.message}`);
-            // 如果价格变化很大，假设OI也有相应变化
-            if (Math.abs(priceChangePercent) > 1) {
-              oiChangePercent = priceChangePercent * 0.5; // 使用价格变化的50%作为近似
-              oiDataSuccess = true;
-            }
+        if (Array.isArray(ratioData) && ratioData.length >= 2) {
+          const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
+          const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
+          
+          if (previousRatio > 0 && currentRatio > 0) {
+            // 使用多空账户比例的变化作为OI变化的近似值
+            oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
+            oiDataSuccess = true;
+            console.log(`方法1成功: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+          } else {
+            console.log(`方法1: 比例数据无效 current=${currentRatio}, previous=${previousRatio}`);
           }
+        } else {
+          console.log(`方法1: 返回数据不是数组或长度不足`, ratioData);
         }
+      } else {
+        console.log(`方法1: API返回错误 ${ratioRes.status} ${ratioRes.statusText}`);
       }
     } catch (e: any) {
       console.log(`方法1失败: ${e.message}`);
     }
 
-    // 方法2: 如果方法1失败，尝试使用topLongShortAccountRatio作为替代指标
-    // 注意：这不是真正的OI，但可以反映市场情绪
+    // 方法2: 如果方法1失败，尝试使用globalLongShortAccountRatio（全球多空比）
     if (!oiDataSuccess) {
       try {
-        const ratioRes = await fetchWithTimeout(
-          `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
+        const globalRatioRes = await fetchWithTimeout(
+          `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
           {
-            timeout: 5000,
+            timeout: 8000,
             next: { revalidate: 60 },
           }
         );
 
-        if (ratioRes.ok) {
-          const ratioData = await ratioRes.json();
+        if (globalRatioRes.ok) {
+          const globalRatioData = await globalRatioRes.json();
           
-          if (Array.isArray(ratioData) && ratioData.length >= 2) {
-            // 使用多空账户比例的变化作为OI变化的近似值
-            const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
-            const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
+          if (Array.isArray(globalRatioData) && globalRatioData.length >= 2) {
+            const currentRatio = parseFloat(globalRatioData[0].longShortRatio || 0);
+            const previousRatio = parseFloat(globalRatioData[1].longShortRatio || 0);
             
-            if (previousRatio > 0) {
-              // 将比例变化转换为百分比（这是一个近似值）
+            if (previousRatio > 0 && currentRatio > 0) {
               oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
               oiDataSuccess = true;
+              console.log(`方法2成功: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
             }
-          } else {
-            console.log(`方法2返回数据格式错误:`, ratioData);
           }
-        } else {
-          console.log(`方法2 API返回错误: ${ratioRes.status} ${ratioRes.statusText}`);
         }
       } catch (e: any) {
         console.log(`方法2失败: ${e.message}`);
@@ -256,12 +233,14 @@ export async function GET(request: NextRequest) {
     const analysis4h = result4h.status === 'fulfilled' ? result4h.value : null;
 
     // 即使部分数据获取失败，也返回成功，让前端显示可用的数据
-    // 添加调试信息
+    // 添加调试信息（在生产环境也返回，帮助诊断问题）
     const debugInfo = {
       '1h_status': result1h.status,
       '4h_status': result4h.status,
-      '1h_reason': result1h.status === 'rejected' ? result1h.reason?.message : null,
-      '4h_reason': result4h.status === 'rejected' ? result4h.reason?.message : null,
+      '1h_reason': result1h.status === 'rejected' ? String(result1h.reason) : null,
+      '4h_reason': result4h.status === 'rejected' ? String(result4h.reason) : null,
+      '1h_data': analysis1h ? 'available' : 'null',
+      '4h_data': analysis4h ? 'available' : 'null',
     };
     
     return NextResponse.json(
@@ -272,7 +251,7 @@ export async function GET(request: NextRequest) {
           '1h': analysis1h,
           '4h': analysis4h,
         },
-        debug: process.env.NODE_ENV === 'development' ? debugInfo : undefined, // 只在开发环境返回调试信息
+        debug: debugInfo, // 返回调试信息，帮助诊断Vercel上的问题
       },
       {
         headers: {

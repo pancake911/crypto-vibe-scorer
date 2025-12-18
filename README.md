@@ -31,11 +31,17 @@
 
 ## 安装和运行
 
+### 前置要求
+
+- **Node.js 18+** - 如果还没安装，访问 https://nodejs.org 下载LTS版本
+
 ### 1. 安装依赖
 
 ```bash
 npm install
 ```
+
+> ⚠️ 第一次运行需要安装依赖，可能需要3-10分钟
 
 ### 2. 运行开发服务器
 
@@ -46,6 +52,20 @@ npm run dev
 ### 3. 打开浏览器
 
 访问 [http://localhost:3000](http://localhost:3000)
+
+### 4. 局域网访问（可选）
+
+如果想在同一网络内的其他设备访问：
+
+```bash
+npm run dev:network
+```
+
+然后使用你的内网IP访问（例如：`http://192.168.1.100:3000`）
+
+查看内网IP：
+- Mac/Linux: `ifconfig | grep "inet " | grep -v 127.0.0.1`
+- Windows: `ipconfig`
 
 ## 使用说明
 

@@ -197,7 +197,7 @@ export default function Home() {
         const hasRealOI = data.data['1h']?.isRealOI || data.data['4h']?.isRealOI;
         const allFailed = data.data['1h']?.dataSource === 'failed' && data.data['4h']?.dataSource === 'failed';
         
-        console.log('服务器端响应检查:', {
+        console.log('🔍 服务器端响应检查:', {
           hasRealOI,
           allFailed,
           '1h_dataSource': data.data['1h']?.dataSource,
@@ -206,10 +206,13 @@ export default function Home() {
           '4h_isRealOI': data.data['4h']?.isRealOI,
         });
         
+        // 如果服务器端失败或没有真实OI数据，强制使用客户端调用
         if (allFailed || !hasRealOI) {
-          // 服务器端失败，尝试客户端直接调用
-          console.log('⚠️ 服务器端API被限制，尝试客户端直接调用Binance API...');
+          // 服务器端失败，尝试客户端直接调用（不设置服务器端数据，等待客户端结果）
+          console.log('⚠️ 服务器端API被限制，强制使用客户端直接调用Binance API...');
+          // 不设置服务器端数据，直接调用客户端
           await fetchOIAnalysisClientDirect(fullSymbol);
+          // 注意：fetchOIAnalysisClientDirect 内部会调用 setOiAnalysis
         } else {
           // 服务器端成功，使用服务器端数据
           console.log('✅ 服务器端成功，使用服务器端数据');
@@ -217,7 +220,7 @@ export default function Home() {
         }
       } else {
         // 服务器端完全失败，尝试客户端直接调用
-        console.log('⚠️ 服务器端API失败，尝试客户端直接调用...');
+        console.log('⚠️ 服务器端API完全失败，强制使用客户端直接调用...');
         await fetchOIAnalysisClientDirect(fullSymbol);
       }
     } catch (error: any) {
@@ -236,7 +239,7 @@ export default function Home() {
   // 客户端直接调用Binance API获取真实OI数据（绕过服务器限制）
   const fetchOIAnalysisClientDirect = async (fullSymbol: string) => {
     try {
-      console.log('客户端直接调用Binance API获取真实OI数据...');
+      console.log('🚀 开始客户端直接调用Binance API获取真实OI数据...', fullSymbol);
       
       // 并行获取价格和OI数据
       console.log('开始并行获取数据...', fullSymbol);

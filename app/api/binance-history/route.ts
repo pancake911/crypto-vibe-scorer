@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
               return {
                 time: `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`,
                 timestamp: item.fundingTime,
-                value: parseFloat(item.fundingRate) * 100, // 转换为百分比
+                value: parseFloat(item.fundingRate), // 保持原始小数形式，前端会转换为百分比显示
               };
             });
         }

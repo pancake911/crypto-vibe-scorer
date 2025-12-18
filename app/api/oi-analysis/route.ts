@@ -218,6 +218,14 @@ export async function GET(request: NextRequest) {
     const analysis4h = result4h.status === 'fulfilled' ? result4h.value : null;
 
     // 即使部分数据获取失败，也返回成功，让前端显示可用的数据
+    // 添加调试信息
+    const debugInfo = {
+      '1h_status': result1h.status,
+      '4h_status': result4h.status,
+      '1h_reason': result1h.status === 'rejected' ? result1h.reason?.message : null,
+      '4h_reason': result4h.status === 'rejected' ? result4h.reason?.message : null,
+    };
+    
     return NextResponse.json(
       {
         success: true,
@@ -226,6 +234,7 @@ export async function GET(request: NextRequest) {
           '1h': analysis1h,
           '4h': analysis4h,
         },
+        debug: process.env.NODE_ENV === 'development' ? debugInfo : undefined, // 只在开发环境返回调试信息
       },
       {
         headers: {

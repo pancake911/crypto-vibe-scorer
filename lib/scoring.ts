@@ -30,47 +30,50 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
   let totalScore = 50; // 起始分数50分
 
   // 1. 资金费率评分
+  // fundingRate是小数形式（如-0.0000349），需要转换为百分比进行比较
+  const fundingRatePercent = inputs.fundingRate * 10000; // 转换为百分比（如-0.00349%）
   const fundingRate = inputs.fundingRate;
-  if (fundingRate > 0.10) {
+  
+  if (fundingRatePercent > 0.10) {
     totalScore -= 20;
     breakdown.push({
       category: '资金费率',
       score: -20,
-      reason: `资金费率 ${fundingRate.toFixed(4)}% > 0.10%，极度危险，建议减仓`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% > 0.10%，极度危险，建议减仓`,
     });
-  } else if (fundingRate >= 0.07 && fundingRate <= 0.09) {
+  } else if (fundingRatePercent >= 0.07 && fundingRatePercent <= 0.09) {
     totalScore -= 10;
     breakdown.push({
       category: '资金费率',
       score: -10,
-      reason: `资金费率 ${fundingRate.toFixed(4)}% 在0.07%-0.09%之间，预警`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0.07%-0.09%之间，预警`,
     });
-  } else if (fundingRate >= 0 && fundingRate <= 0.02) {
+  } else if (fundingRatePercent >= 0 && fundingRatePercent <= 0.02) {
     totalScore += 10;
     breakdown.push({
       category: '资金费率',
       score: +10,
-      reason: `资金费率 ${fundingRate.toFixed(4)}% 在0%-0.02%之间，健康`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0%-0.02%之间，健康`,
     });
-  } else if (fundingRate >= -0.04 && fundingRate <= -0.01) {
+  } else if (fundingRatePercent >= -0.04 && fundingRatePercent <= -0.01) {
     totalScore += 20;
     breakdown.push({
       category: '资金费率',
       score: +20,
-      reason: `资金费率 ${fundingRate.toFixed(4)}% 在-0.04%到-0.01%之间，最佳加仓时机`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在-0.04%到-0.01%之间，最佳加仓时机`,
     });
-  } else if (fundingRate < -0.05) {
+  } else if (fundingRatePercent < -0.05) {
     totalScore += 30;
     breakdown.push({
       category: '资金费率',
       score: +30,
-      reason: `资金费率 ${fundingRate.toFixed(4)}% < -0.05%，无脑抄底信号`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% < -0.05%，无脑抄底信号`,
     });
   } else {
     breakdown.push({
       category: '资金费率',
       score: 0,
-      reason: `资金费率 ${fundingRate.toFixed(4)}%，中性`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}%，中性`,
     });
   }
 

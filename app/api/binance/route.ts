@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
       }
       const data = await response.json();
       if (data && data.lastFundingRate !== undefined) {
-        fundingRateValue = parseFloat(data.lastFundingRate) * 100; // 转换为百分比
+        // Binance API返回的是小数形式（如-0.0000349），需要乘以100得到百分比数值（-0.00349）
+        // 但为了与币安APP显示一致，我们直接使用原始值，前端会处理显示
+        fundingRateValue = parseFloat(data.lastFundingRate); // 保持原始小数形式
         fundingRateTimestamp = data.time || Date.now();
       } else {
         throw new Error('资金费率数据格式错误');

@@ -40,8 +40,16 @@ export async function GET(request: NextRequest) {
       });
 
       if (!response.ok) {
+        console.log(`❌ 代理获取${type}数据失败:`, {
+          symbol,
+          period,
+          status: response.status,
+          statusText: response.statusText,
+        });
+        
         // 如果返回451，尝试使用不同的方法
         if (response.status === 451 && type === 'oi') {
+          console.log('尝试使用openInterest API作为备用...');
           // 尝试使用openInterest API获取当前OI，然后通过其他方式估算变化
           const currentOIRes = await fetchWithTimeout(
             `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
@@ -79,6 +87,12 @@ export async function GET(request: NextRequest) {
       }
 
       const data = await response.json();
+      
+      console.log(`✅ 代理成功获取${type}数据:`, {
+        symbol,
+        period,
+        dataLength: Array.isArray(data) ? data.length : 'not array',
+      });
       
       return NextResponse.json(
         { success: true, data },

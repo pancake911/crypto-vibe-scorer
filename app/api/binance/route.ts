@@ -40,8 +40,12 @@ export async function GET(request: NextRequest) {
           fundingRateValue = fundingRateData[0].rate * 100;
           fundingRateTimestamp = fundingRateData[0].timestamp;
         } else {
-          fundingRateValue = fundingRateData.rate * 100;
-          fundingRateTimestamp = fundingRateData.timestamp;
+          // 处理非数组情况，使用类型断言
+          const rateData = fundingRateData as any;
+          if (rateData && typeof rateData.rate === 'number') {
+            fundingRateValue = rateData.rate * 100;
+            fundingRateTimestamp = rateData.timestamp || Date.now();
+          }
         }
       } catch (e2: any) {
         console.error('ccxt获取资金费率也失败:', e2.message);

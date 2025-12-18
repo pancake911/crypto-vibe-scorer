@@ -125,9 +125,10 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       );
 
       if (oiRes.ok) {
-        const oiData = await oiRes.json();
+        const oiData: any = await oiRes.json();
         
-        if (Array.isArray(oiData) && oiData.length >= 2 && !oiData.code) {
+        // 检查是否是数组（数组不会有code属性，所以不需要检查code）
+        if (Array.isArray(oiData) && oiData.length >= 2) {
           const currentOI = parseFloat(oiData[0].sumOpenInterest || oiData[0].openInterest || 0);
           const previousOI = parseFloat(oiData[1].sumOpenInterest || oiData[1].openInterest || 0);
           
@@ -155,7 +156,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
         if (ratioRes.ok) {
           const ratioData = await ratioRes.json();
           
-          if (Array.isArray(ratioData) && ratioData.length >= 2 && !ratioData.code) {
+          if (Array.isArray(ratioData) && ratioData.length >= 2) {
             // 使用多空账户比例的变化作为OI变化的近似值
             const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
             const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);

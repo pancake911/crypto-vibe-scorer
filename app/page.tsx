@@ -123,8 +123,8 @@ export default function Home() {
           
           if (newFundingRate !== null) {
             setFundingRateHistory(prev => {
-              // fundingRate已经是小数形式（如-0.0000349），需要乘以10000得到百分比显示值（-0.00349）
-              const newData = [...prev, { time: timeStr, timestamp, value: newFundingRate * 10000 }];
+              // fundingRate已经是小数形式（如-0.0000158），需要乘以100得到百分比显示值（-0.00158%）
+              const newData = [...prev, { time: timeStr, timestamp, value: newFundingRate * 100 }];
               return newData.slice(-10); // 只保留最近10个
             });
           }
@@ -853,7 +853,7 @@ export default function Home() {
                             <div className="text-xs text-bloomberg-text-dim">{timeStr}</div>
                           </div>
                           <div className="text-sm text-bloomberg-text-dim">
-                            {record.fundingRate !== null && `费率: ${(record.fundingRate * 10000).toFixed(5)}%`}
+                            {record.fundingRate !== null && `费率: ${(record.fundingRate * 100).toFixed(5)}%`}
                             {record.longShortRatio !== null && ` | 多空比: ${record.longShortRatio.toFixed(2)}`}
                             {record.fearGreedIndex !== null && ` | F&G: ${record.fearGreedIndex}`}
                           </div>
@@ -1154,17 +1154,17 @@ export default function Home() {
               <div className="p-4 bg-bloomberg-dark rounded border border-bloomberg-border">
                 <div className="text-sm text-bloomberg-text-dim mb-1">资金费率</div>
                 <div className={`text-2xl font-bold ${
-                  fundingRate !== null && fundingRate * 10000 > 0.07 ? 'text-bloomberg-red' :
-                  fundingRate !== null && fundingRate * 10000 < -0.01 ? 'text-bloomberg-green' :
+                  fundingRate !== null && fundingRate * 100 > 0.07 ? 'text-bloomberg-red' :
+                  fundingRate !== null && fundingRate * 100 < -0.01 ? 'text-bloomberg-green' :
                   'text-bloomberg-text'
                 }`}>
-                  {fundingRate !== null ? `${(fundingRate * 10000).toFixed(5)}%` : loading ? '获取中...' : '未获取'}
+                  {fundingRate !== null ? `${(fundingRate * 100).toFixed(5)}%` : loading ? '获取中...' : '未获取'}
                 </div>
                 {fundingRate !== null && (
                   <div className="text-xs text-bloomberg-text-dim mt-1">
-                    {fundingRate * 10000 > 0.07 ? '⚠️ 极度危险' : 
-                     fundingRate * 10000 > 0 ? '多头付费' : 
-                     fundingRate * 10000 < -0.01 ? '✅ 空头付费（做多机会）' : '中性'}
+                    {fundingRate * 100 > 0.07 ? '⚠️ 极度危险' : 
+                     fundingRate * 100 > 0 ? '多头付费' : 
+                     fundingRate * 100 < -0.01 ? '✅ 空头付费（做多机会）' : '中性'}
                   </div>
                 )}
                 {fundingRate === null && !loading && (

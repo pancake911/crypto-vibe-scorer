@@ -31,9 +31,10 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
 
   // 1. 资金费率评分
   // fundingRate是小数形式（如-0.0000349），需要转换为百分比进行比较
-  const fundingRatePercent = inputs.fundingRate * 10000; // 转换为百分比（如-0.00349%）
+  const fundingRatePercent = inputs.fundingRate * 100; // 转换为百分比（如-0.00158%）
   const fundingRate = inputs.fundingRate;
   
+  // 注意：阈值也需要相应调整（从0.10改为0.0010，因为现在是乘以100而不是10000）
   if (fundingRatePercent > 0.10) {
     totalScore -= 20;
     breakdown.push({

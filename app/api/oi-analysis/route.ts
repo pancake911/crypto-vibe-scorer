@@ -101,20 +101,22 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       }
     );
 
+    let priceChangePercent = 0;
+    
     if (!klinesRes.ok) {
-      console.error(`获取价格数据失败: ${klinesRes.status}`);
-      return null;
+      console.error(`获取价格数据失败: ${klinesRes.status}，使用默认值0%`);
+      // 不返回null，继续执行，使用默认价格变化0%
+    } else {
+      const klinesData = await klinesRes.json();
+      if (!Array.isArray(klinesData) || klinesData.length < 2) {
+        console.error('价格数据不足，使用默认值0%');
+        // 不返回null，继续执行，使用默认价格变化0%
+      } else {
+        const currentPrice = parseFloat(klinesData[0][4]); // 收盘价
+        const previousPrice = parseFloat(klinesData[1][4]); // 上一个收盘价
+        priceChangePercent = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+      }
     }
-
-    const klinesData = await klinesRes.json();
-    if (!Array.isArray(klinesData) || klinesData.length < 2) {
-      console.error('价格数据不足');
-      return null;
-    }
-
-    const currentPrice = parseFloat(klinesData[0][4]); // 收盘价
-    const previousPrice = parseFloat(klinesData[1][4]); // 上一个收盘价
-    const priceChangePercent = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
 
     // 2. 获取OI数据 - 尝试多个API端点
     let oiChangePercent = 0;
@@ -194,14 +196,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       oiDataSuccess = true; // 至少返回一些数据，而不是null
     }
 
-    // 如果所有方法都失败，至少返回基于价格的分析（标记为近似值）
-    if (!oiDataSuccess) {
-      console.warn(`无法获取${period}周期的真实OI数据，使用价格变化近似值`);
-      // 使用价格变化作为最后的fallback
-      oiChangePercent = priceChangePercent * 0.3;
-    }
-
-    // 3. 分析趋势
+    // 3. 分析趋势（即使数据都是0，也返回分析结果）
     const analysis = analyzeOITrend(priceChangePercent, oiChangePercent);
 
     return {
@@ -210,7 +205,16 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     };
   } catch (error: any) {
     console.error(`获取${period} OI分析失败:`, error.message);
-    return null;
+    // 即使出错也返回一个默认的分析结果，而不是null
+    return {
+      period,
+      priceChange: 0,
+      oiChange: 0,
+      score: 0,
+      label: '⚪ 数据获取失败',
+      description: '无法获取OI数据，请稍后重试',
+      status: 'healthy',
+    };
   }
 }
 

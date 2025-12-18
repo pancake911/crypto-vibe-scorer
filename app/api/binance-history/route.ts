@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
+// 使用Edge Runtime
+export const runtime = 'edge';
+
 // 获取币安历史数据（用于图表初始化）
 export async function GET(request: NextRequest) {
   try {
@@ -110,10 +113,18 @@ export async function GET(request: NextRequest) {
       console.log('获取多空比历史失败:', e.message);
     }
 
-    return NextResponse.json({
-      success: true,
-      data: results,
-    });
+    // 历史数据可以缓存更长时间（2分钟）
+    return NextResponse.json(
+      {
+        success: true,
+        data: results,
+      },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=240',
+        },
+      }
+    );
   } catch (error: any) {
     console.error('Binance History API Error:', error);
     return NextResponse.json(

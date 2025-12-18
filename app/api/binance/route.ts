@@ -1,21 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ccxt from 'ccxt';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
+
+// 使用Edge Runtime，更快，无冷启动
+export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const symbol = searchParams.get('symbol') || 'BTC/USDT';
     const period = searchParams.get('period') || '5m'; // 获取用户选择的周期
-    
-    const exchange = new ccxt.binance({
-      enableRateLimit: true,
-      options: {
-        defaultType: 'future', // 使用期货市场
-      },
-    });
 
-    // 获取资金费率（优先使用直接API调用，更可靠）
+    // 获取资金费率（直接使用Binance API，不使用ccxt）
     let fundingRateValue = null;
     let fundingRateTimestamp = Date.now();
     try {
@@ -35,24 +30,8 @@ export async function GET(request: NextRequest) {
         throw new Error('资金费率数据格式错误');
       }
     } catch (e: any) {
-      console.error('直接API获取资金费率失败:', e.message);
-      // 备用方案：使用ccxt
-      try {
-        const fundingRateData = await exchange.fetchFundingRate(symbol);
-        if (Array.isArray(fundingRateData)) {
-          fundingRateValue = fundingRateData[0].rate * 100;
-          fundingRateTimestamp = fundingRateData[0].timestamp;
-        } else {
-          // 处理非数组情况，使用类型断言
-          const rateData = fundingRateData as any;
-          if (rateData && typeof rateData.rate === 'number') {
-            fundingRateValue = rateData.rate * 100;
-            fundingRateTimestamp = rateData.timestamp || Date.now();
-          }
-        }
-      } catch (e2: any) {
-        console.error('ccxt获取资金费率也失败:', e2.message);
-      }
+      console.error('获取资金费率失败:', e.message);
+      // 如果失败，fundingRateValue保持为null
     }
     
     // 获取多空持仓比（使用Binance公开API，根据用户选择的周期）
@@ -77,41 +56,43 @@ export async function GET(request: NextRequest) {
       // 如果获取失败，设置为null，前端会显示"数据不可用"
     }
 
-    // 获取24小时ticker数据
+    // 获取24小时ticker数据（直接使用Binance API）
     let price = null;
     let volume24h = null;
     try {
-      const ticker = await exchange.fetchTicker(symbol);
-      price = ticker.last;
-      volume24h = ticker.quoteVolume;
-    } catch (e: any) {
-      console.error('获取价格失败:', e.message);
-      // 如果失败，尝试直接调用Binance API
-      try {
-        const baseSymbol = symbol.replace('/', '');
-        const tickerResponse = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${baseSymbol}`, {
-          timeout: 3000,
-        });
+      const baseSymbol = symbol.replace('/', '');
+      const tickerResponse = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${baseSymbol}`, {
+        timeout: 3000,
+      });
+      if (tickerResponse.ok) {
         const tickerData = await tickerResponse.json();
         price = parseFloat(tickerData.lastPrice);
         volume24h = parseFloat(tickerData.quoteVolume);
-      } catch (e2) {
-        console.error('备用价格获取也失败:', e2);
       }
+    } catch (e: any) {
+      console.error('获取价格失败:', e.message);
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        symbol: symbol.replace('/', ''),
-        fundingRate: fundingRateValue,
-        fundingRateTimestamp: fundingRateTimestamp,
-        price,
-        volume24h,
-        longShortRatio, // 如果获取不到则为null
-        longShortRatioPeriod: longShortRatioPeriod, // 多空持仓比周期
+    // 添加缓存头（30秒缓存，减少API调用）
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          symbol: symbol.replace('/', ''),
+          fundingRate: fundingRateValue,
+          fundingRateTimestamp: fundingRateTimestamp,
+          price,
+          volume24h,
+          longShortRatio, // 如果获取不到则为null
+          longShortRatioPeriod: longShortRatioPeriod, // 多空持仓比周期
+        },
       },
-    });
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      }
+    );
   } catch (error: any) {
     console.error('Binance API Error:', error);
     return NextResponse.json(

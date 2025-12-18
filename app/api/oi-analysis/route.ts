@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
+// 使用Edge Runtime（注意：Edge Runtime不支持某些Node.js API，但fetch和基本操作都支持）
+// export const runtime = 'edge'; // 暂时注释，因为OI分析可能需要更多时间
+
 // OI趋势分析结果接口
 interface OIAnalysisResult {
   period: '1h' | '4h';

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
+// 使用Edge Runtime
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -33,15 +36,23 @@ export async function GET(request: NextRequest) {
       parseFloat(ask[1]), // 数量
     ]);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        symbol,
-        bids,
-        asks,
-        lastUpdateId: data.lastUpdateId,
+    // 盘口数据实时性要求高，但可以短暂缓存（5秒）
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          symbol,
+          bids,
+          asks,
+          lastUpdateId: data.lastUpdateId,
+        },
       },
-    });
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10',
+        },
+      }
+    );
   } catch (error: any) {
     console.error('Order Book API Error:', error);
     return NextResponse.json(

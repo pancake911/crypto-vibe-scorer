@@ -91,67 +91,79 @@ export default function Home() {
     }
   };
 
-  // 获取自动数据
+  // 获取自动数据（优化：使用并行请求）
   const fetchAutoData = async () => {
     setLoading(true);
     try {
-      // 获取Binance数据（传递用户选择的周期）
-      const binanceRes = await fetch(`/api/binance?symbol=${symbol}/USDT&period=${selectedPeriod}`);
-      const binanceData = await binanceRes.json();
+      // 并行请求Binance数据和恐惧贪婪指数（提高速度）
+      const [binanceRes, fngRes] = await Promise.allSettled([
+        fetch(`/api/binance?symbol=${symbol}/USDT&period=${selectedPeriod}`),
+        fetch('/api/fear-greed'),
+      ]);
       
-      if (binanceData.success) {
-        console.log('Binance数据:', binanceData.data); // 调试用
-        const newFundingRate = binanceData.data.fundingRate;
-        const newLongShortRatio = binanceData.data.longShortRatio;
-        const newPrice = binanceData.data.price;
+      // 处理Binance数据
+      if (binanceRes.status === 'fulfilled') {
+        const binanceData = await binanceRes.value.json();
         
-        setFundingRate(newFundingRate);
-        setLongShortRatio(newLongShortRatio);
-        setLongShortRatioPeriod(binanceData.data.longShortRatioPeriod || '5m');
-        setPrice(newPrice);
-        
-        // 更新图表历史数据（最多保留10个数据点）
-        const now = new Date();
-        const timestamp = now.getTime();
-        const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-        
-        if (newFundingRate !== null) {
-          setFundingRateHistory(prev => {
-            const newData = [...prev, { time: timeStr, timestamp, value: newFundingRate * 100 }];
-            return newData.slice(-10); // 只保留最近10个
-          });
-        }
-        
-        if (newLongShortRatio !== null) {
-          setLongShortRatioHistory(prev => {
-            const newData = [...prev, { time: timeStr, timestamp, value: newLongShortRatio }];
-            return newData.slice(-10); // 只保留最近10个
-          });
-        }
-        
-        if (newPrice !== null) {
-          setPriceHistory(prev => {
-            const newData = [...prev, { time: timeStr, timestamp, value: newPrice }];
-            return newData.slice(-10); // 只保留最近10个
-          });
+        if (binanceData.success) {
+          console.log('Binance数据:', binanceData.data); // 调试用
+          const newFundingRate = binanceData.data.fundingRate;
+          const newLongShortRatio = binanceData.data.longShortRatio;
+          const newPrice = binanceData.data.price;
+          
+          setFundingRate(newFundingRate);
+          setLongShortRatio(newLongShortRatio);
+          setLongShortRatioPeriod(binanceData.data.longShortRatioPeriod || '5m');
+          setPrice(newPrice);
+          
+          // 更新图表历史数据（最多保留10个数据点）
+          const now = new Date();
+          const timestamp = now.getTime();
+          const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+          
+          if (newFundingRate !== null) {
+            setFundingRateHistory(prev => {
+              const newData = [...prev, { time: timeStr, timestamp, value: newFundingRate * 100 }];
+              return newData.slice(-10); // 只保留最近10个
+            });
+          }
+          
+          if (newLongShortRatio !== null) {
+            setLongShortRatioHistory(prev => {
+              const newData = [...prev, { time: timeStr, timestamp, value: newLongShortRatio }];
+              return newData.slice(-10); // 只保留最近10个
+            });
+          }
+          
+          if (newPrice !== null) {
+            setPriceHistory(prev => {
+              const newData = [...prev, { time: timeStr, timestamp, value: newPrice }];
+              return newData.slice(-10); // 只保留最近10个
+            });
+          }
+        } else {
+          console.error('Binance API错误:', binanceData.error);
+          // 不显示alert，只记录错误，避免打断用户体验
         }
       } else {
-        console.error('Binance API错误:', binanceData.error);
-        alert('获取Binance数据失败: ' + (binanceData.error || '未知错误'));
+        console.error('Binance请求失败:', binanceRes.reason);
       }
 
-      // 获取恐惧贪婪指数
-      const fngRes = await fetch('/api/fear-greed');
-      const fngData = await fngRes.json();
-      
-      if (fngData.success) {
-        setFearGreedIndex(fngData.data.value);
+      // 处理恐惧贪婪指数
+      if (fngRes.status === 'fulfilled') {
+        const fngData = await fngRes.value.json();
+        
+        if (fngData.success) {
+          setFearGreedIndex(fngData.data.value);
+        } else {
+          console.error('恐惧贪婪指数API错误:', fngData.error);
+        }
       } else {
-        console.error('恐惧贪婪指数API错误:', fngData.error);
+        console.error('恐惧贪婪指数请求失败:', fngRes.reason);
       }
     } catch (error: any) {
       console.error('获取数据失败:', error);
-      alert('获取数据失败: ' + (error.message || '网络错误，请检查网络连接'));
+      // 不显示alert，只记录错误
     } finally {
       setLoading(false);
     }

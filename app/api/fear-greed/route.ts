@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 export async function GET() {
   try {
-    const response = await fetch('https://api.alternative.me/fng/', {
+    const response = await fetchWithTimeout('https://api.alternative.me/fng/', {
+      timeout: 5000, // 5秒超时
       next: { revalidate: 300 }, // 缓存5分钟
     });
     

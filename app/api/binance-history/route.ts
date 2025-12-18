@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 // 获取币安历史数据（用于图表初始化）
 export async function GET(request: NextRequest) {
@@ -23,9 +24,10 @@ export async function GET(request: NextRequest) {
 
     // 1. 获取资金费率历史
     try {
-      const fundingRateRes = await fetch(
+      const fundingRateRes = await fetchWithTimeout(
         `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=${limit}`,
         {
+          timeout: 3000, // 3秒超时
           next: { revalidate: 60 }, // 缓存1分钟
         }
       );
@@ -51,9 +53,10 @@ export async function GET(request: NextRequest) {
 
     // 2. 获取价格历史（使用K线数据）
     try {
-      const klinesRes = await fetch(
+      const klinesRes = await fetchWithTimeout(
         `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
         {
+          timeout: 3000, // 3秒超时
           next: { revalidate: 60 },
         }
       );
@@ -80,9 +83,10 @@ export async function GET(request: NextRequest) {
     // 3. 获取多空持仓比历史（使用全球多空比数据）
     try {
       // 币安提供历史多空比数据，使用limit参数获取最近N条
-      const ratioRes = await fetch(
+      const ratioRes = await fetchWithTimeout(
         `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=${limit}`,
         {
+          timeout: 3000, // 3秒超时
           next: { revalidate: 60 },
         }
       );

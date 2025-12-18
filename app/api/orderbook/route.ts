@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 export async function GET(request: NextRequest) {
   try {
@@ -6,10 +7,11 @@ export async function GET(request: NextRequest) {
     const symbol = searchParams.get('symbol') || 'BTCUSDT';
     const limit = parseInt(searchParams.get('limit') || '20');
 
-    // 调用Binance Futures API获取深度数据
-    const response = await fetch(
+    // 调用Binance Futures API获取深度数据（2秒超时，实时数据）
+    const response = await fetchWithTimeout(
       `https://fapi.binance.com/fapi/v1/depth?symbol=${symbol}&limit=${limit}`,
       {
+        timeout: 2000, // 2秒超时
         next: { revalidate: 0 }, // 不缓存，实时数据
       }
     );

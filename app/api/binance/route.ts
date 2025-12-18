@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ccxt from 'ccxt';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,8 +20,10 @@ export async function GET(request: NextRequest) {
     let fundingRateTimestamp = Date.now();
     try {
       const baseSymbol = symbol.replace('/', '');
-      // 直接调用Binance API获取资金费率
-      const response = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${baseSymbol}`);
+      // 直接调用Binance API获取资金费率（3秒超时）
+      const response = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${baseSymbol}`, {
+        timeout: 3000,
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -59,8 +62,10 @@ export async function GET(request: NextRequest) {
       const baseSymbol = symbol.replace('/', '');
       // 使用Binance的Global Long/Short Ratio API
       // period可选值: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
-      // 使用用户选择的周期
-      const ratioResponse = await fetch(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${baseSymbol}&period=${period}&limit=1`);
+      // 使用用户选择的周期（3秒超时）
+      const ratioResponse = await fetchWithTimeout(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${baseSymbol}&period=${period}&limit=1`, {
+        timeout: 3000,
+      });
       if (ratioResponse.ok) {
         const ratioData = await ratioResponse.json();
         if (ratioData && ratioData.length > 0) {
@@ -84,7 +89,9 @@ export async function GET(request: NextRequest) {
       // 如果失败，尝试直接调用Binance API
       try {
         const baseSymbol = symbol.replace('/', '');
-        const tickerResponse = await fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${baseSymbol}`);
+        const tickerResponse = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${baseSymbol}`, {
+          timeout: 3000,
+        });
         const tickerData = await tickerResponse.json();
         price = parseFloat(tickerData.lastPrice);
         volume24h = parseFloat(tickerData.quoteVolume);

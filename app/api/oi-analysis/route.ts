@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 // OI趋势分析结果接口
 interface OIAnalysisResult {
@@ -89,9 +90,10 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
   try {
     // 1. 获取价格历史数据（K线）- 这个API是可靠的
     const interval = period === '1h' ? '1h' : '4h';
-    const klinesRes = await fetch(
+    const klinesRes = await fetchWithTimeout(
       `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=2`,
       {
+        timeout: 3000, // 3秒超时
         next: { revalidate: 60 },
       }
     );
@@ -117,9 +119,10 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
 
     // 方法1: 尝试使用openInterestStatistics（如果可用）
     try {
-      const oiRes = await fetch(
+      const oiRes = await fetchWithTimeout(
         `https://fapi.binance.com/futures/data/openInterestStatistics?symbol=${symbol}&period=${period}&limit=2`,
         {
+          timeout: 3000, // 3秒超时
           next: { revalidate: 60 },
         }
       );
@@ -146,9 +149,10 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     // 注意：这不是真正的OI，但可以反映市场情绪
     if (!oiDataSuccess) {
       try {
-        const ratioRes = await fetch(
+        const ratioRes = await fetchWithTimeout(
           `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
           {
+            timeout: 3000, // 3秒超时
             next: { revalidate: 60 },
           }
         );

@@ -96,7 +96,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     const klinesRes = await fetchWithTimeout(
       `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=2`,
       {
-        timeout: 3000, // 3秒超时
+        timeout: 5000, // 增加到5秒超时
         next: { revalidate: 60 },
       }
     );
@@ -125,7 +125,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       const oiRes = await fetchWithTimeout(
         `https://fapi.binance.com/futures/data/openInterestStatistics?symbol=${symbol}&period=${period}&limit=2`,
         {
-          timeout: 3000, // 3秒超时
+          timeout: 5000, // 增加到5秒超时，OI数据API可能较慢
           next: { revalidate: 60 },
         }
       );
@@ -155,7 +155,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
         const ratioRes = await fetchWithTimeout(
           `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
           {
-            timeout: 3000, // 3秒超时
+            timeout: 5000, // 增加到5秒超时
             next: { revalidate: 60 },
           }
         );
@@ -208,20 +208,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Symbol is required' }, { status: 400 });
     }
 
-    // 并行获取1小时和4小时的分析
-    const [analysis1h, analysis4h] = await Promise.all([
+    // 并行获取1小时和4小时的分析（使用Promise.allSettled，避免一个失败影响另一个）
+    const [result1h, result4h] = await Promise.allSettled([
       getOIAnalysis(symbol, '1h'),
       getOIAnalysis(symbol, '4h'),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        symbol,
-        '1h': analysis1h,
-        '4h': analysis4h,
+    const analysis1h = result1h.status === 'fulfilled' ? result1h.value : null;
+    const analysis4h = result4h.status === 'fulfilled' ? result4h.value : null;
+
+    // 即使部分数据获取失败，也返回成功，让前端显示可用的数据
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          symbol,
+          '1h': analysis1h,
+          '4h': analysis4h,
+        },
       },
-    });
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+        },
+      }
+    );
   } catch (error: any) {
     console.error('OI Analysis API Error:', error);
     return NextResponse.json(

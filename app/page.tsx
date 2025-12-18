@@ -169,17 +169,26 @@ export default function Home() {
     }
   };
 
-  // 获取OI趋势分析
+  // 获取OI趋势分析（添加超时和更好的错误处理）
   const fetchOIAnalysis = async () => {
     if (!symbol) return;
     
     setOiAnalysisLoading(true);
     try {
       const baseSymbol = symbol.toUpperCase().replace('/', '');
-      const response = await fetch(`/api/oi-analysis?symbol=${baseSymbol}USDT`);
+      // 添加超时控制（10秒）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`/api/oi-analysis?symbol=${baseSymbol}USDT`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
       const data = await response.json();
       
       if (data.success && data.data) {
+        // 即使部分数据为null，也设置数据（让前端显示可用的部分）
         setOiAnalysis(data.data);
       } else {
         console.error('获取OI分析失败:', data.error);
@@ -187,6 +196,9 @@ export default function Home() {
       }
     } catch (error: any) {
       console.error('获取OI分析失败:', error);
+      if (error.name === 'AbortError') {
+        console.error('OI分析请求超时（10秒）');
+      }
       setOiAnalysis(null);
     } finally {
       setOiAnalysisLoading(false);
@@ -258,14 +270,22 @@ export default function Home() {
     // 获取OI分析
     fetchOIAnalysis();
     
-    // 获取盘口数据并分析
+    // 获取盘口数据并分析（添加超时控制）
     const fetchOrderBook = async () => {
       if (!symbol) return;
       
       setOrderBookLoading(true);
       try {
         const baseSymbol = symbol.toUpperCase().replace('/', '');
-        const response = await fetch(`/api/orderbook?symbol=${baseSymbol}USDT&limit=20`);
+        // 添加超时控制（8秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const response = await fetch(`/api/orderbook?symbol=${baseSymbol}USDT&limit=20`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
         const data = await response.json();
         
         if (data.success && data.data) {
@@ -296,6 +316,9 @@ export default function Home() {
         }
       } catch (error: any) {
         console.error('获取盘口数据失败:', error);
+        if (error.name === 'AbortError') {
+          console.error('盘口数据请求超时（8秒）');
+        }
       } finally {
         setOrderBookLoading(false);
       }

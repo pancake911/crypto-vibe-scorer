@@ -93,30 +93,62 @@ function analyzeOITrend(priceChangePercent: number, oiChangePercent: number): Om
 // 获取OI和价格数据并分析
 async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAnalysisResult | null> {
   try {
-    // 1. 获取价格历史数据（K线）- 这个API是可靠的
+    // 1. 获取价格历史数据（K线）- 如果被限制，使用ticker API作为备用
     const interval = period === '1h' ? '1h' : '4h';
-    const klinesRes = await fetchWithTimeout(
-      `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=2`,
-      {
-        timeout: 5000, // 增加到5秒超时
-        next: { revalidate: 60 },
-      }
-    );
-
     let priceChangePercent = 0;
     
-    if (!klinesRes.ok) {
-      console.error(`获取价格数据失败: ${klinesRes.status}，使用默认值0%`);
-      // 不返回null，继续执行，使用默认价格变化0%
-    } else {
-      const klinesData = await klinesRes.json();
-      if (!Array.isArray(klinesData) || klinesData.length < 2) {
-        console.error('价格数据不足，使用默认值0%');
-        // 不返回null，继续执行，使用默认价格变化0%
+    // 先尝试klines API
+    try {
+      const klinesRes = await fetchWithTimeout(
+        `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=2`,
+        {
+          timeout: 10000,
+          next: { revalidate: 60 },
+        }
+      );
+      
+      if (klinesRes.ok) {
+        const klinesData = await klinesRes.json();
+        if (Array.isArray(klinesData) && klinesData.length >= 2) {
+          const currentPrice = parseFloat(klinesData[0][4]); // 收盘价
+          const previousPrice = parseFloat(klinesData[1][4]); // 上一个收盘价
+          priceChangePercent = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+          console.log(`✅ 使用Klines API获取价格变化: ${priceChangePercent.toFixed(2)}%`);
+        }
+      } else if (klinesRes.status === 451) {
+        console.log(`⚠️ Klines API返回451（被限制），尝试使用ticker API`);
+        // 如果被限制，尝试使用ticker API
+        throw new Error('Klines API被限制');
       } else {
-        const currentPrice = parseFloat(klinesData[0][4]); // 收盘价
-        const previousPrice = parseFloat(klinesData[1][4]); // 上一个收盘价
-        priceChangePercent = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+        console.log(`⚠️ Klines API返回错误: ${klinesRes.status}`);
+      }
+    } catch (e: any) {
+      // 如果klines失败或被限制，使用ticker API作为备用
+      console.log(`尝试使用ticker API作为备用: ${e.message}`);
+      try {
+        const tickerRes = await fetchWithTimeout(
+          `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`,
+          {
+            timeout: 10000,
+            next: { revalidate: 60 },
+          }
+        );
+        
+        if (tickerRes.ok) {
+          const tickerData = await tickerRes.json();
+          const currentPrice = parseFloat(tickerData.lastPrice || 0);
+          const openPrice = parseFloat(tickerData.openPrice || 0);
+          
+          if (openPrice > 0) {
+            // 使用24小时价格变化作为近似值（这不是精确的1h/4h变化，但至少可以继续分析）
+            priceChangePercent = ((currentPrice - openPrice) / openPrice) * 100;
+            console.log(`⚠️ 使用ticker API获取价格变化（近似值）: ${priceChangePercent.toFixed(2)}%`);
+          }
+        } else if (tickerRes.status === 451) {
+          console.log(`⚠️ Ticker API也返回451，使用默认值0%`);
+        }
+      } catch (e2: any) {
+        console.log(`Ticker API也失败: ${e2.message}，使用默认值0%`);
       }
     }
 
@@ -165,6 +197,8 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
               } else {
                 console.log(`方法1: 历史OI数据格式错误`, historyData);
               }
+            } else if (historyOIRes.status === 451) {
+              console.log(`方法1: 历史OI API返回451（被限制），尝试其他方法`);
             } else {
               console.log(`方法1: 历史OI API返回错误 ${historyOIRes.status}`);
             }
@@ -185,6 +219,8 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
         } else {
           console.log(`方法1: 当前OI为0或无效`);
         }
+      } else if (currentOIRes.status === 451) {
+        console.log(`方法1: 当前OI API返回451（被限制），尝试其他方法`);
       } else {
         console.log(`方法1: 当前OI API返回错误 ${currentOIRes.status} ${currentOIRes.statusText}`);
       }
@@ -219,6 +255,8 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
               console.log(`⚠️ 方法2（近似OI）: ${period}周期 多空比变化 ${oiChangePercent.toFixed(2)}%`);
             }
           }
+        } else if (ratioRes.status === 451) {
+          console.log(`方法2: API返回451（被限制）`);
         }
       } catch (e: any) {
         console.log(`方法2失败: ${e.message}`);

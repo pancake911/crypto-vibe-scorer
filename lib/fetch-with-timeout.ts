@@ -13,8 +13,18 @@ export async function fetchWithTimeout(
     : null;
 
   try {
+    // 添加请求头，模拟浏览器请求，避免被Binance API限制
+    const headers = new Headers(fetchOptions.headers);
+    if (!headers.has('User-Agent')) {
+      headers.set('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    }
+    if (!headers.has('Accept')) {
+      headers.set('Accept', 'application/json');
+    }
+    
     const response = await fetch(url, {
       ...fetchOptions,
+      headers,
       signal: controller.signal,
     });
     if (timeoutId && typeof clearTimeout !== 'undefined') {

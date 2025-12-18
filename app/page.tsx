@@ -171,18 +171,21 @@ export default function Home() {
   };
 
   // 获取OI趋势分析（添加超时和更好的错误处理）
-  // 如果服务器端API被限制，尝试客户端直接调用Binance API
+  // 如果服务器端API被限制，自动尝试客户端直接调用
   const fetchOIAnalysis = async () => {
     if (!symbol) return;
     
     setOiAnalysisLoading(true);
     try {
       const baseSymbol = symbol.toUpperCase().replace('/', '');
-      // 添加超时控制（10秒）
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const fullSymbol = `${baseSymbol}USDT`;
       
-      const response = await fetch(`/api/oi-analysis?symbol=${baseSymbol}USDT`, {
+      // 添加超时控制（15秒）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      // 先尝试服务器端API
+      const response = await fetch(`/api/oi-analysis?symbol=${fullSymbol}`, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -190,46 +193,225 @@ export default function Home() {
       const data = await response.json();
       
       if (data.success && data.data) {
-        // 检查是否所有数据都是null（说明服务器端API被限制）
-        if (data.data['1h'] === null && data.data['4h'] === null && data.debug) {
-          console.log('服务器端API被限制，尝试客户端直接调用:', data.debug);
-          // 尝试客户端直接调用（如果CORS允许）
-          await fetchOIAnalysisClientDirect(baseSymbol);
+        // 检查是否获取到了真实OI数据
+        const hasRealOI = data.data['1h']?.isRealOI || data.data['4h']?.isRealOI;
+        const allFailed = data.data['1h']?.dataSource === 'failed' && data.data['4h']?.dataSource === 'failed';
+        
+        if (allFailed || !hasRealOI) {
+          // 服务器端失败，尝试客户端直接调用
+          console.log('服务器端API被限制，尝试客户端直接调用Binance API...');
+          await fetchOIAnalysisClientDirect(fullSymbol);
         } else {
-          // 即使部分数据为null，也设置数据（让前端显示可用的部分）
+          // 服务器端成功，使用服务器端数据
           setOiAnalysis(data.data);
         }
       } else {
-        console.error('获取OI分析失败:', data.error);
-        setOiAnalysis(null);
+        // 服务器端完全失败，尝试客户端直接调用
+        console.log('服务器端API失败，尝试客户端直接调用...');
+        await fetchOIAnalysisClientDirect(fullSymbol);
       }
     } catch (error: any) {
       console.error('获取OI分析失败:', error);
       if (error.name === 'AbortError') {
-        console.error('OI分析请求超时（10秒）');
+        console.error('OI分析请求超时（15秒）');
       }
-      setOiAnalysis(null);
+      // 即使超时，也尝试客户端直接调用
+      const baseSymbol = symbol.toUpperCase().replace('/', '');
+      await fetchOIAnalysisClientDirect(`${baseSymbol}USDT`);
     } finally {
       setOiAnalysisLoading(false);
     }
   };
 
-  // 客户端直接调用Binance API（如果服务器端被限制）
-  const fetchOIAnalysisClientDirect = async (baseSymbol: string) => {
+  // 客户端直接调用Binance API获取真实OI数据（绕过服务器限制）
+  const fetchOIAnalysisClientDirect = async (fullSymbol: string) => {
     try {
-      console.log('尝试客户端直接调用Binance API...');
-      // 注意：这需要Binance API支持CORS，如果不支持会失败
-      // 但至少可以尝试
-      const [res1h, res4h] = await Promise.allSettled([
-        fetch(`https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${baseSymbol}USDT&period=1h&limit=2`),
-        fetch(`https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${baseSymbol}USDT&period=4h&limit=2`),
-      ]);
+      console.log('客户端直接调用Binance API获取真实OI数据...');
       
-      // 如果客户端调用成功，处理数据
-      // 这里简化处理，实际应该调用完整的分析逻辑
-      console.log('客户端调用结果:', res1h.status, res4h.status);
+      // 并行获取价格和OI数据
+      const [price1hRes, price4hRes, oi1hRes, oi4hRes] = await Promise.allSettled([
+        // 1小时价格
+        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=1h&limit=2`),
+        // 4小时价格
+        fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=4h&limit=2`),
+        // 1小时OI历史
+        fetch(`https://fapi.binance.com/futures/data/openInterestHistory?symbol=${fullSymbol}&period=1h&limit=2`),
+        // 4小时OI历史
+        fetch(`https://fapi.binance.com/futures/data/openInterestHistory?symbol=${fullSymbol}&period=4h&limit=2`),
+      ]);
+
+      // 处理1小时数据
+      let analysis1h: any = null;
+      if (price1hRes.status === 'fulfilled' && oi1hRes.status === 'fulfilled') {
+        try {
+          const priceData = await price1hRes.value.json();
+          const oiData = await oi1hRes.value.json();
+          
+          if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
+            const currentPrice = parseFloat(priceData[0][4]);
+            const previousPrice = parseFloat(priceData[1][4]);
+            const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+            
+            const currentOI = parseFloat(oiData[0].sumOpenInterest || oiData[0].openInterest || 0);
+            const previousOI = parseFloat(oiData[1].sumOpenInterest || oiData[1].openInterest || 0);
+            const oiChange = previousOI > 0 ? ((currentOI - previousOI) / previousOI) * 100 : 0;
+            
+            // 简单的分析逻辑（与服务器端保持一致）
+            let label = '⚪ 无明显信号';
+            let description = '价格和OI变化都在正常范围内';
+            let score = 0;
+            let status: 'healthy' | 'danger' | 'opportunity' | 'accumulation' | 'crash' = 'healthy';
+            
+            if (priceChange > 0.5 && oiChange > 0.5) {
+              label = '🟢 趋势健康 (资金做多)';
+              description = '价格上涨且OI上涨，资金进场推动上涨';
+              score = 10;
+              status = 'healthy';
+            } else if (priceChange > 0.5 && oiChange < -0.5) {
+              label = '🔴 顶部背离 (多头跑路)';
+              description = '价格新高但多头离场，只剩下散户在冲';
+              score = -15;
+              status = 'danger';
+            } else if (priceChange < -1 && oiChange > 2) {
+              label = '🟡 底部异动 (恐慌盘/强力换手)';
+              description = '下跌中有人疯狂开仓，可能是被动爆仓后的V反，或者是主力接针';
+              score = 15;
+              status = 'opportunity';
+            } else if (Math.abs(priceChange) <= 0.2 && oiChange > 1) {
+              label = '🔵 主力潜伏 (蓄势待发)';
+              description = '价格横盘但OI持续上涨，暗中建仓';
+              score = 10;
+              status = 'accumulation';
+            } else if (oiChange < -5) {
+              label = '⚠️ 多头大逃亡 (大清算)';
+              description = 'OI单次暴跌，多头大逃亡';
+              score = -20;
+              status = 'crash';
+            }
+            
+            analysis1h = {
+              period: '1h',
+              priceChange,
+              oiChange,
+              score,
+              label,
+              description,
+              status,
+              dataSource: 'client_direct_binance',
+              isRealOI: true,
+            };
+            console.log('✅ 客户端获取1h真实OI数据成功');
+          }
+        } catch (e: any) {
+          console.log('客户端处理1h数据失败:', e.message);
+        }
+      }
+
+      // 处理4小时数据
+      let analysis4h: any = null;
+      if (price4hRes.status === 'fulfilled' && oi4hRes.status === 'fulfilled') {
+        try {
+          const priceData = await price4hRes.value.json();
+          const oiData = await oi4hRes.value.json();
+          
+          if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
+            const currentPrice = parseFloat(priceData[0][4]);
+            const previousPrice = parseFloat(priceData[1][4]);
+            const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+            
+            const currentOI = parseFloat(oiData[0].sumOpenInterest || oiData[0].openInterest || 0);
+            const previousOI = parseFloat(oiData[1].sumOpenInterest || oiData[1].openInterest || 0);
+            const oiChange = previousOI > 0 ? ((currentOI - previousOI) / previousOI) * 100 : 0;
+            
+            // 简单的分析逻辑
+            let label = '⚪ 无明显信号';
+            let description = '价格和OI变化都在正常范围内';
+            let score = 0;
+            let status: 'healthy' | 'danger' | 'opportunity' | 'accumulation' | 'crash' = 'healthy';
+            
+            if (priceChange > 0.5 && oiChange > 0.5) {
+              label = '🟢 趋势健康 (资金做多)';
+              description = '价格上涨且OI上涨，资金进场推动上涨';
+              score = 10;
+              status = 'healthy';
+            } else if (priceChange > 0.5 && oiChange < -0.5) {
+              label = '🔴 顶部背离 (多头跑路)';
+              description = '价格新高但多头离场，只剩下散户在冲';
+              score = -15;
+              status = 'danger';
+            } else if (priceChange < -1 && oiChange > 2) {
+              label = '🟡 底部异动 (恐慌盘/强力换手)';
+              description = '下跌中有人疯狂开仓，可能是被动爆仓后的V反，或者是主力接针';
+              score = 15;
+              status = 'opportunity';
+            } else if (Math.abs(priceChange) <= 0.2 && oiChange > 1) {
+              label = '🔵 主力潜伏 (蓄势待发)';
+              description = '价格横盘但OI持续上涨，暗中建仓';
+              score = 10;
+              status = 'accumulation';
+            } else if (oiChange < -5) {
+              label = '⚠️ 多头大逃亡 (大清算)';
+              description = 'OI单次暴跌，多头大逃亡';
+              score = -20;
+              status = 'crash';
+            }
+            
+            analysis4h = {
+              period: '4h',
+              priceChange,
+              oiChange,
+              score,
+              label,
+              description,
+              status,
+              dataSource: 'client_direct_binance',
+              isRealOI: true,
+            };
+            console.log('✅ 客户端获取4h真实OI数据成功');
+          }
+        } catch (e: any) {
+          console.log('客户端处理4h数据失败:', e.message);
+        }
+      }
+
+      // 如果获取到了数据，设置到state
+      if (analysis1h || analysis4h) {
+        setOiAnalysis({
+          '1h': analysis1h,
+          '4h': analysis4h,
+        });
+        console.log('✅ 客户端直接调用成功，已获取真实OI数据');
+      } else {
+        console.log('❌ 客户端直接调用也失败（可能是CORS限制）');
+        // 如果客户端也失败，显示错误信息
+        setOiAnalysis({
+          '1h': {
+            period: '1h',
+            priceChange: 0,
+            oiChange: 0,
+            score: 0,
+            label: '❌ 无法获取真实OI数据',
+            description: '服务器端和客户端都无法获取数据。可能是CORS限制或网络问题。',
+            status: 'healthy',
+            dataSource: 'failed',
+            isRealOI: false,
+          },
+          '4h': {
+            period: '4h',
+            priceChange: 0,
+            oiChange: 0,
+            score: 0,
+            label: '❌ 无法获取真实OI数据',
+            description: '服务器端和客户端都无法获取数据。可能是CORS限制或网络问题。',
+            status: 'healthy',
+            dataSource: 'failed',
+            isRealOI: false,
+          },
+        });
+      }
     } catch (e: any) {
-      console.log('客户端直接调用也失败（可能是CORS限制）:', e.message);
+      console.error('客户端直接调用失败:', e.message);
+      setOiAnalysis(null);
     }
   };
 

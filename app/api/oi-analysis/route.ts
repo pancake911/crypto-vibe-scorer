@@ -31,43 +31,33 @@ async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promis
 
     const metaData: any = await metaRes.json();
     
-    // 检查响应格式（添加详细日志）
-    console.log('Hyperliquid API完整响应:', JSON.stringify(metaData, null, 2).substring(0, 500));
-    console.log('Hyperliquid API响应检查:', {
-      hasAssetCtxs: !!metaData?.assetCtxs,
-      assetCtxsType: Array.isArray(metaData?.assetCtxs) ? 'array' : typeof metaData?.assetCtxs,
-      assetCtxsLength: Array.isArray(metaData?.assetCtxs) ? metaData.assetCtxs.length : 'not array',
-      allKeys: metaData ? Object.keys(metaData) : [],
-    });
-    
-    // 查找对应币种的资产上下文
+    // Hyperliquid API返回的是一个数组：[{universe, marginTables, ...}, {assetCtxs: [...]}]
+    // assetCtxs数组的顺序对应universe数组的顺序
     let assetCtx = null;
     
-    // 尝试多种可能的响应格式
-    if (Array.isArray(metaData?.assetCtxs)) {
-      assetCtx = metaData.assetCtxs.find((ctx: any) => 
-        ctx.name?.toUpperCase() === coin.toUpperCase()
-      );
-    } else if (metaData?.assetCtxs && typeof metaData.assetCtxs === 'object') {
-      // 如果是对象，直接查找键
-      assetCtx = metaData.assetCtxs[coin.toUpperCase()] || metaData.assetCtxs[coin];
-    }
-    
-    // 如果assetCtxs为空或找不到，尝试从universe中查找
-    if (!assetCtx && metaData?.universe) {
-      const coinInfo = metaData.universe.find((item: any) => 
-        item.name?.toUpperCase() === coin.toUpperCase()
-      );
-      if (coinInfo) {
-        console.log('从universe中找到币种信息:', coinInfo);
-        // universe可能不包含OI数据，但我们可以尝试
+    if (Array.isArray(metaData) && metaData.length >= 2) {
+      const universe = metaData[0]?.universe;
+      const assetCtxs = metaData[1]?.assetCtxs;
+      
+      if (Array.isArray(universe) && Array.isArray(assetCtxs)) {
+        // 在universe中找到币种的索引
+        const coinIndex = universe.findIndex((item: any) => 
+          item.name?.toUpperCase() === coin.toUpperCase()
+        );
+        
+        if (coinIndex >= 0 && assetCtxs[coinIndex]) {
+          assetCtx = assetCtxs[coinIndex];
+          console.log(`✅ 找到${coin}的OI数据:`, {
+            openInterest: assetCtx.openInterest,
+            funding: assetCtx.funding,
+            markPx: assetCtx.markPx,
+          });
+        }
       }
     }
 
-    if (!assetCtx || assetCtx.openInterest === undefined) {
-      console.log('未找到资产上下文，尝试使用价格变化估算OI...');
-      // 即使没有OI数据，也尝试使用价格变化来估算
-      // 这样至少可以显示一些数据
+    if (!assetCtx || assetCtx.openInterest === undefined || assetCtx.openInterest === '0.0') {
+      console.log('未找到资产上下文或OI数据为0，尝试使用价格变化估算OI...');
       return {
         success: false,
         error: '未找到资产上下文或OI数据，将使用价格变化估算',
@@ -114,7 +104,11 @@ async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promis
             : 0;
 
           // 使用价格变化的30%作为OI变化的近似值
+          // 注意：这是估算值，不是真实的历史OI变化
+          // 但至少当前OI是真实的
           const estimatedOIPercent = priceChangePercent * 0.3;
+
+          console.log(`✅ Hyperliquid获取到真实当前OI: ${currentOI}, 基于价格变化估算OI变化: ${estimatedOIPercent.toFixed(2)}%`);
 
           return {
             success: true,
@@ -127,7 +121,9 @@ async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promis
       console.log('获取历史价格数据失败:', e.message);
     }
 
-    // 如果无法获取历史数据，至少返回当前OI
+    // 如果无法获取历史价格数据，至少返回当前真实OI
+    // 虽然无法计算变化，但至少可以显示当前OI值
+    console.log(`✅ Hyperliquid获取到真实当前OI: ${currentOI}（无法计算变化）`);
     return {
       success: true,
       currentOI,

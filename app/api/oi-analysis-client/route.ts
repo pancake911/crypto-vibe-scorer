@@ -32,9 +32,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 优先使用第三方代理服务器（如果配置了）
+    const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL;
+    let finalUrl = url;
+    
+    if (PROXY_SERVER_URL && type === 'oi') {
+      // 如果配置了代理服务器，使用代理
+      finalUrl = `${PROXY_SERVER_URL}/proxy?url=${encodeURIComponent(url)}`;
+      console.log('使用第三方代理服务器:', PROXY_SERVER_URL);
+    }
+    
     // 尝试使用fetchWithTimeout（带User-Agent）
     try {
-      const response = await fetchWithTimeout(url, {
+      const response = await fetchWithTimeout(finalUrl, {
         timeout: 10000,
         next: { revalidate: 60 },
       });

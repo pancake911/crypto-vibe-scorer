@@ -197,17 +197,27 @@ export default function Home() {
         const hasRealOI = data.data['1h']?.isRealOI || data.data['4h']?.isRealOI;
         const allFailed = data.data['1h']?.dataSource === 'failed' && data.data['4h']?.dataSource === 'failed';
         
+        console.log('服务器端响应检查:', {
+          hasRealOI,
+          allFailed,
+          '1h_dataSource': data.data['1h']?.dataSource,
+          '4h_dataSource': data.data['4h']?.dataSource,
+          '1h_isRealOI': data.data['1h']?.isRealOI,
+          '4h_isRealOI': data.data['4h']?.isRealOI,
+        });
+        
         if (allFailed || !hasRealOI) {
           // 服务器端失败，尝试客户端直接调用
-          console.log('服务器端API被限制，尝试客户端直接调用Binance API...');
+          console.log('⚠️ 服务器端API被限制，尝试客户端直接调用Binance API...');
           await fetchOIAnalysisClientDirect(fullSymbol);
         } else {
           // 服务器端成功，使用服务器端数据
+          console.log('✅ 服务器端成功，使用服务器端数据');
           setOiAnalysis(data.data);
         }
       } else {
         // 服务器端完全失败，尝试客户端直接调用
-        console.log('服务器端API失败，尝试客户端直接调用...');
+        console.log('⚠️ 服务器端API失败，尝试客户端直接调用...');
         await fetchOIAnalysisClientDirect(fullSymbol);
       }
     } catch (error: any) {
@@ -229,6 +239,7 @@ export default function Home() {
       console.log('客户端直接调用Binance API获取真实OI数据...');
       
       // 并行获取价格和OI数据
+      console.log('开始并行获取数据...', fullSymbol);
       const [price1hRes, price4hRes, oi1hRes, oi4hRes] = await Promise.allSettled([
         // 1小时价格
         fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${fullSymbol}&interval=1h&limit=2`),
@@ -240,12 +251,33 @@ export default function Home() {
         fetch(`https://fapi.binance.com/futures/data/openInterestHistory?symbol=${fullSymbol}&period=4h&limit=2`),
       ]);
 
+      console.log('数据获取结果:', {
+        price1h: price1hRes.status,
+        price4h: price4hRes.status,
+        oi1h: oi1hRes.status,
+        oi4h: oi4hRes.status,
+      });
+
       // 处理1小时数据
       let analysis1h: any = null;
       if (price1hRes.status === 'fulfilled' && oi1hRes.status === 'fulfilled') {
         try {
+          // 检查响应状态
+          if (!price1hRes.value.ok) {
+            console.log('1h价格API返回错误:', price1hRes.value.status, price1hRes.value.statusText);
+          }
+          if (!oi1hRes.value.ok) {
+            console.log('1h OI API返回错误:', oi1hRes.value.status, oi1hRes.value.statusText);
+          }
+          
           const priceData = await price1hRes.value.json();
           const oiData = await oi1hRes.value.json();
+          
+          console.log('1h数据解析:', {
+            priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',
+            oiDataLength: Array.isArray(oiData) ? oiData.length : 'not array',
+            oiDataSample: Array.isArray(oiData) && oiData.length > 0 ? oiData[0] : oiData,
+          });
           
           if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
             const currentPrice = parseFloat(priceData[0][4]);
@@ -303,16 +335,37 @@ export default function Home() {
             console.log('✅ 客户端获取1h真实OI数据成功');
           }
         } catch (e: any) {
-          console.log('客户端处理1h数据失败:', e.message);
+          console.error('客户端处理1h数据失败:', e);
         }
+      } else {
+        console.log('1h数据获取失败:', {
+          price1hStatus: price1hRes.status,
+          oi1hStatus: oi1hRes.status,
+          price1hReason: price1hRes.status === 'rejected' ? price1hRes.reason : null,
+          oi1hReason: oi1hRes.status === 'rejected' ? oi1hRes.reason : null,
+        });
       }
 
       // 处理4小时数据
       let analysis4h: any = null;
       if (price4hRes.status === 'fulfilled' && oi4hRes.status === 'fulfilled') {
         try {
+          // 检查响应状态
+          if (!price4hRes.value.ok) {
+            console.log('4h价格API返回错误:', price4hRes.value.status, price4hRes.value.statusText);
+          }
+          if (!oi4hRes.value.ok) {
+            console.log('4h OI API返回错误:', oi4hRes.value.status, oi4hRes.value.statusText);
+          }
+          
           const priceData = await price4hRes.value.json();
           const oiData = await oi4hRes.value.json();
+          
+          console.log('4h数据解析:', {
+            priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',
+            oiDataLength: Array.isArray(oiData) ? oiData.length : 'not array',
+            oiDataSample: Array.isArray(oiData) && oiData.length > 0 ? oiData[0] : oiData,
+          });
           
           if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
             const currentPrice = parseFloat(priceData[0][4]);
@@ -370,8 +423,15 @@ export default function Home() {
             console.log('✅ 客户端获取4h真实OI数据成功');
           }
         } catch (e: any) {
-          console.log('客户端处理4h数据失败:', e.message);
+          console.error('客户端处理4h数据失败:', e);
         }
+      } else {
+        console.log('4h数据获取失败:', {
+          price4hStatus: price4hRes.status,
+          oi4hStatus: oi4hRes.status,
+          price4hReason: price4hRes.status === 'rejected' ? price4hRes.reason : null,
+          oi4hReason: oi4hRes.status === 'rejected' ? oi4hRes.reason : null,
+        });
       }
 
       // 如果获取到了数据，设置到state

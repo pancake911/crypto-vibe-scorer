@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
 // 测试Hyperliquid API在Vercel上的访问情况
-export const runtime = 'edge';
+// 注意：Edge Runtime可能对POST请求有限制，如果失败，可以改为Node.js runtime
+// export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
   try {

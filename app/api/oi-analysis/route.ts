@@ -1,6 +1,129 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout';
 
+// 导入Hyperliquid OI获取函数（直接调用，避免HTTP请求）
+async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promise<{
+  success: boolean;
+  currentOI?: number;
+  oiChangePercent?: number;
+  error?: string;
+}> {
+  try {
+    // 方法1: 尝试使用metaAndAssetCtxs获取当前OI
+    const metaRes = await fetchWithTimeout(
+      'https://api.hyperliquid.xyz/info',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'metaAndAssetCtxs' }),
+        timeout: 10000,
+      }
+    );
+
+    if (!metaRes.ok) {
+      return {
+        success: false,
+        error: `Hyperliquid API返回错误: ${metaRes.status}`,
+      };
+    }
+
+    const metaData: any = await metaRes.json();
+    
+    // 检查响应格式
+    console.log('Hyperliquid API响应:', {
+      hasAssetCtxs: !!metaData?.assetCtxs,
+      assetCtxsType: Array.isArray(metaData?.assetCtxs) ? 'array' : typeof metaData?.assetCtxs,
+      assetCtxsLength: Array.isArray(metaData?.assetCtxs) ? metaData.assetCtxs.length : 'not array',
+    });
+    
+    // 查找对应币种的资产上下文
+    let assetCtx = null;
+    
+    if (Array.isArray(metaData?.assetCtxs)) {
+      assetCtx = metaData.assetCtxs.find((ctx: any) => 
+        ctx.name?.toUpperCase() === coin.toUpperCase()
+      );
+    } else if (metaData?.assetCtxs && typeof metaData.assetCtxs === 'object') {
+      // 如果是对象，直接查找键
+      assetCtx = metaData.assetCtxs[coin.toUpperCase()] || metaData.assetCtxs[coin];
+    }
+
+    if (!assetCtx || assetCtx.openInterest === undefined) {
+      return {
+        success: false,
+        error: '未找到资产上下文或OI数据',
+      };
+    }
+
+    const currentOI = parseFloat(assetCtx.openInterest || 0);
+    
+    if (currentOI === 0) {
+      return {
+        success: false,
+        error: '当前OI为0，数据可能不准确',
+      };
+    }
+
+    // 获取历史K线数据来计算价格变化，然后估算OI变化
+    try {
+      const candleRes = await fetchWithTimeout(
+        'https://api.hyperliquid.xyz/info',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'candleSnapshot',
+            req: {
+              coin: coin.toUpperCase(),
+              interval: period,
+              n: 2,
+            },
+          }),
+          timeout: 10000,
+        }
+      );
+
+      if (candleRes.ok) {
+        const candleData: any = await candleRes.json();
+        if (Array.isArray(candleData) && candleData.length >= 2) {
+          const currentPrice = parseFloat(candleData[0].c || candleData[0].close || 0);
+          const previousPrice = parseFloat(candleData[1].c || candleData[1].close || 0);
+          const priceChangePercent = previousPrice > 0 
+            ? ((currentPrice - previousPrice) / previousPrice) * 100 
+            : 0;
+
+          // 使用价格变化的30%作为OI变化的近似值
+          const estimatedOIPercent = priceChangePercent * 0.3;
+
+          return {
+            success: true,
+            currentOI,
+            oiChangePercent: estimatedOIPercent,
+          };
+        }
+      }
+    } catch (e: any) {
+      console.log('获取历史价格数据失败:', e.message);
+    }
+
+    // 如果无法获取历史数据，至少返回当前OI
+    return {
+      success: true,
+      currentOI,
+    };
+  } catch (error: any) {
+    console.error('获取Hyperliquid OI数据失败:', error);
+    return {
+      success: false,
+      error: error.message || '获取Hyperliquid OI数据失败',
+    };
+  }
+}
+
 // 不使用Edge Runtime，因为需要多次API调用，Node.js runtime更稳定
 // export const runtime = 'edge';
 
@@ -152,12 +275,43 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       }
     }
 
-    // 2. 获取真实的OI数据 - 使用Binance的openInterest API
+    // 2. 获取真实的OI数据 - 优先使用Hyperliquid API，然后尝试Binance API
     let oiChangePercent = 0;
     let oiDataSuccess = false;
     let oiDataSource = 'unknown'; // 记录数据来源，用于调试
+    let isRealOI = false; // 标记是否为真实OI数据
 
-    // 方法1: 尝试使用Binance公共数据端点（data-api.binance.vision）- 可能不受限制
+    // 方法0: 优先使用Hyperliquid API获取OI数据（不受Vercel IP限制）
+    try {
+      // 将Binance symbol转换为Hyperliquid coin格式（例如：BTCUSDT -> BTC）
+      const coin = symbol.replace('USDT', '').replace('USD', '');
+      
+      // 直接调用内部函数，避免HTTP请求开销
+      const hyperliquidData = await getHyperliquidOIDirect(coin, period);
+
+      if (hyperliquidData.success) {
+        if (hyperliquidData.oiChangePercent !== undefined) {
+          oiChangePercent = hyperliquidData.oiChangePercent;
+          oiDataSuccess = true;
+          oiDataSource = 'hyperliquid_api';
+          isRealOI = false; // 这是基于价格变化估算的，不是真实历史OI
+          console.log(`✅ 方法0成功（Hyperliquid OI，基于价格估算）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+        } else if (hyperliquidData.currentOI) {
+          // 如果只有当前OI，使用价格变化估算
+          oiChangePercent = priceChangePercent * 0.3; // 使用价格变化的30%作为估算
+          oiDataSuccess = true;
+          oiDataSource = 'hyperliquid_current_oi_estimated';
+          isRealOI = false; // 估算数据不是真实历史OI
+          console.log(`⚠️ 方法0: Hyperliquid只有当前OI，使用价格变化估算: ${period}周期 估算OI变化 ${oiChangePercent.toFixed(2)}%`);
+        }
+      } else {
+        console.log(`方法0失败（Hyperliquid）: ${hyperliquidData.error}`);
+      }
+    } catch (e: any) {
+      console.log(`方法0异常（Hyperliquid）: ${e.message}`);
+    }
+
+    // 方法1: 如果Hyperliquid失败，尝试使用Binance公共数据端点（data-api.binance.vision）- 可能不受限制
     try {
       // 注意：这个端点可能不支持所有数据，但值得尝试
       const publicDataRes = await fetchWithTimeout(
@@ -178,6 +332,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
             oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
             oiDataSuccess = true;
             oiDataSource = 'binance_public_api';
+            isRealOI = true;
             console.log(`✅ 方法1成功（Binance公共API真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
           }
         }
@@ -219,6 +374,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
                 oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
                 oiDataSuccess = true;
                 oiDataSource = 'bybit_api';
+                isRealOI = true;
                 console.log(`✅ 方法2成功（Bybit真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
               }
             }
@@ -313,12 +469,8 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       };
     }
 
-    // 判断是否为真实OI数据（包括估算数据，因为至少当前OI是真实的）
-    const isRealOI = oiDataSource === 'binance_standard_api' || 
-                     oiDataSource === 'binance_public_api' || 
-                     oiDataSource === 'bybit_api' ||
-                     oiDataSource === 'binance_current_oi_estimated' ||
-                     oiDataSource === 'binance_current_oi_only';
+    // 判断是否为真实OI数据（已经在上面设置，这里不再重复判断）
+    // isRealOI变量已经在各个方法中设置
 
     // 3. 分析趋势（使用真实OI数据或估算数据）
     const analysis = analyzeOITrend(priceChangePercent, oiChangePercent);

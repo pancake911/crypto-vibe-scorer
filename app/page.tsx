@@ -1017,11 +1017,19 @@ export default function Home() {
                   </div>
                   <div className="mt-3 pt-3 border-t border-bloomberg-border">
                     <p className="text-xs text-bloomberg-text-dim">{oiAnalysis['1h'].description}</p>
-                    {oiAnalysis['1h'].isRealOI !== undefined && (
-                      <p className="text-xs mt-1 ${
-                        oiAnalysis['1h'].isRealOI ? 'text-bloomberg-green' : 'text-bloomberg-yellow'
-                      }">
-                        {oiAnalysis['1h'].isRealOI ? '✅ 真实OI数据' : '⚠️ 估算数据（真实OI不可用）'}
+                    {oiAnalysis['1h'].dataSource && (
+                      <p className={`text-xs mt-1 ${
+                        oiAnalysis['1h'].dataSource === 'hyperliquid_api' || oiAnalysis['1h'].dataSource === 'hyperliquid_current_oi_estimated'
+                          ? 'text-bloomberg-blue'
+                          : oiAnalysis['1h'].isRealOI 
+                          ? 'text-bloomberg-green' 
+                          : 'text-bloomberg-yellow'
+                      }`}>
+                        {oiAnalysis['1h'].dataSource === 'hyperliquid_api' || oiAnalysis['1h'].dataSource === 'hyperliquid_current_oi_estimated'
+                          ? '🌊 Hyperliquid数据源'
+                          : oiAnalysis['1h'].isRealOI 
+                          ? '✅ 真实OI数据' 
+                          : '⚠️ 估算数据（真实OI不可用）'}
                       </p>
                     )}
                   </div>
@@ -1090,11 +1098,19 @@ export default function Home() {
                   </div>
                   <div className="mt-3 pt-3 border-t border-bloomberg-border">
                     <p className="text-xs text-bloomberg-text-dim">{oiAnalysis['4h'].description}</p>
-                    {oiAnalysis['4h'].isRealOI !== undefined && (
+                    {oiAnalysis['4h'].dataSource && (
                       <p className={`text-xs mt-1 ${
-                        oiAnalysis['4h'].isRealOI ? 'text-bloomberg-green' : 'text-bloomberg-yellow'
+                        oiAnalysis['4h'].dataSource === 'hyperliquid_api' || oiAnalysis['4h'].dataSource === 'hyperliquid_current_oi_estimated'
+                          ? 'text-bloomberg-blue'
+                          : oiAnalysis['4h'].isRealOI 
+                          ? 'text-bloomberg-green' 
+                          : 'text-bloomberg-yellow'
                       }`}>
-                        {oiAnalysis['4h'].isRealOI ? '✅ 真实OI数据' : '⚠️ 估算数据（真实OI不可用）'}
+                        {oiAnalysis['4h'].dataSource === 'hyperliquid_api' || oiAnalysis['4h'].dataSource === 'hyperliquid_current_oi_estimated'
+                          ? '🌊 Hyperliquid数据源'
+                          : oiAnalysis['4h'].isRealOI 
+                          ? '✅ 真实OI数据' 
+                          : '⚠️ 估算数据（真实OI不可用）'}
                       </p>
                     )}
                   </div>

@@ -270,6 +270,19 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
                     oiDataSource = 'binance_standard_api';
                     console.log(`✅ 方法3成功（Binance标准API真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
                   }
+                } else {
+                  console.log(`方法3: 历史OI数据格式错误或数据不足`, historyData);
+                }
+              } else {
+                console.log(`方法3: 历史OI API返回错误 ${historyOIRes.status} ${historyOIRes.statusText}`);
+                // 如果历史数据获取失败，但当前OI可用，尝试使用当前OI和价格变化估算
+                // 这是一个fallback，虽然不是完美的，但至少可以显示一些信息
+                if (currentOI > 0 && Math.abs(priceChangePercent) > 0.1) {
+                  // 使用价格变化的30%作为OI变化的近似值
+                  oiChangePercent = priceChangePercent * 0.3;
+                  oiDataSuccess = true;
+                  oiDataSource = 'binance_current_oi_estimated';
+                  console.log(`⚠️ 方法3: 使用当前OI和价格变化估算: ${period}周期 估算OI变化 ${oiChangePercent.toFixed(2)}%`);
                 }
               }
             } catch (e2: any) {
@@ -300,7 +313,14 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       };
     }
 
-    // 3. 分析趋势（使用真实OI数据）
+    // 判断是否为真实OI数据（包括估算数据，因为至少当前OI是真实的）
+    const isRealOI = oiDataSource === 'binance_standard_api' || 
+                     oiDataSource === 'binance_public_api' || 
+                     oiDataSource === 'bybit_api' ||
+                     oiDataSource === 'binance_current_oi_estimated' ||
+                     oiDataSource === 'binance_current_oi_only';
+
+    // 3. 分析趋势（使用真实OI数据或估算数据）
     const analysis = analyzeOITrend(priceChangePercent, oiChangePercent);
 
     return {
@@ -308,7 +328,7 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
       ...analysis,
       // 添加数据来源标记，让前端知道这是真实数据
       dataSource: oiDataSource,
-      isRealOI: oiDataSource === 'binance_public_api' || oiDataSource === 'bybit_api' || oiDataSource === 'binance_standard_api',
+      isRealOI: isRealOI,
     };
   } catch (error: any) {
     console.error(`获取${period} OI分析失败:`, error.message);

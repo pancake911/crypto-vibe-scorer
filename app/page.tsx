@@ -295,9 +295,15 @@ export default function Home() {
             priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',
             oiDataLength: Array.isArray(oiData) ? oiData.length : 'not array',
             oiDataSample: Array.isArray(oiData) && oiData.length > 0 ? oiData[0] : oiData,
+            hasBackupNote: oiResponse && oiResponse.note,
           });
           
-          if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
+          // 检查是否有备用数据（只有当前OI，没有历史数据）
+          const hasBackupData = oiResponse && oiResponse.note && oiResponse.note.includes('Only current OI available');
+          
+          if (Array.isArray(priceData) && priceData.length >= 2) {
+            // 如果有历史OI数据（至少2个点），可以计算变化
+            if (Array.isArray(oiData) && oiData.length >= 2) {
             const currentPrice = parseFloat(priceData[0][4]);
             const previousPrice = parseFloat(priceData[1][4]);
             const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
@@ -351,6 +357,26 @@ export default function Home() {
               isRealOI: true,
             };
             console.log('✅ 客户端获取1h真实OI数据成功');
+            } else if (hasBackupData && Array.isArray(oiData) && oiData.length === 1) {
+              // 只有当前OI，无法计算变化，但可以显示当前值
+              const currentPrice = parseFloat(priceData[0][4]);
+              const previousPrice = parseFloat(priceData[1][4]);
+              const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+              const currentOI = parseFloat(oiData[0].openInterest || oiData[0].sumOpenInterest || 0);
+              
+              analysis1h = {
+                period: '1h',
+                priceChange,
+                oiChange: 0, // 无法计算变化
+                score: 0,
+                label: '⚠️ 仅当前OI可用',
+                description: `当前OI: ${currentOI.toLocaleString()}，历史数据被限制(451)，无法计算变化`,
+                status: 'healthy',
+                dataSource: 'client_proxy_current_only',
+                isRealOI: true,
+              };
+              console.log('⚠️ 客户端获取1h当前OI（无历史数据）');
+            }
           }
         } catch (e: any) {
           console.error('客户端处理1h数据失败:', e);
@@ -389,9 +415,15 @@ export default function Home() {
             priceDataLength: Array.isArray(priceData) ? priceData.length : 'not array',
             oiDataLength: Array.isArray(oiData) ? oiData.length : 'not array',
             oiDataSample: Array.isArray(oiData) && oiData.length > 0 ? oiData[0] : oiData,
+            hasBackupNote: oiResponse && oiResponse.note,
           });
           
-          if (Array.isArray(priceData) && priceData.length >= 2 && Array.isArray(oiData) && oiData.length >= 2) {
+          // 检查是否有备用数据（只有当前OI，没有历史数据）
+          const hasBackupData4h = oiResponse && oiResponse.note && oiResponse.note.includes('Only current OI available');
+          
+          if (Array.isArray(priceData) && priceData.length >= 2) {
+            // 如果有历史OI数据（至少2个点），可以计算变化
+            if (Array.isArray(oiData) && oiData.length >= 2) {
             const currentPrice = parseFloat(priceData[0][4]);
             const previousPrice = parseFloat(priceData[1][4]);
             const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
@@ -445,6 +477,26 @@ export default function Home() {
               isRealOI: true,
             };
             console.log('✅ 客户端获取4h真实OI数据成功');
+            } else if (hasBackupData4h && Array.isArray(oiData) && oiData.length === 1) {
+              // 只有当前OI，无法计算变化，但可以显示当前值
+              const currentPrice = parseFloat(priceData[0][4]);
+              const previousPrice = parseFloat(priceData[1][4]);
+              const priceChange = previousPrice > 0 ? ((currentPrice - previousPrice) / previousPrice) * 100 : 0;
+              const currentOI = parseFloat(oiData[0].openInterest || oiData[0].sumOpenInterest || 0);
+              
+              analysis4h = {
+                period: '4h',
+                priceChange,
+                oiChange: 0, // 无法计算变化
+                score: 0,
+                label: '⚠️ 仅当前OI可用',
+                description: `当前OI: ${currentOI.toLocaleString()}，历史数据被限制(451)，无法计算变化`,
+                status: 'healthy',
+                dataSource: 'client_proxy_current_only',
+                isRealOI: true,
+              };
+              console.log('⚠️ 客户端获取4h当前OI（无历史数据）');
+            }
           }
         } catch (e: any) {
           console.error('客户端处理4h数据失败:', e);

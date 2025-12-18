@@ -50,33 +50,43 @@ export async function GET(request: NextRequest) {
         // 如果返回451，尝试使用不同的方法
         if (response.status === 451 && type === 'oi') {
           console.log('尝试使用openInterest API作为备用...');
-          // 尝试使用openInterest API获取当前OI，然后通过其他方式估算变化
-          const currentOIRes = await fetchWithTimeout(
-            `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
-            {
-              timeout: 10000,
-              next: { revalidate: 60 },
-            }
-          );
-          
-          if (currentOIRes.ok) {
-            const currentOIData: any = await currentOIRes.json();
-            // 返回当前OI，让客户端知道至少获取到了当前值
-            return NextResponse.json(
-              { 
-                success: true, 
-                data: [{
-                  openInterest: currentOIData.openInterest,
-                  timestamp: Date.now(),
-                }],
-                note: 'Only current OI available, historical data blocked',
-              },
+          // 尝试使用openInterest API获取当前OI
+          try {
+            const currentOIRes = await fetchWithTimeout(
+              `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
               {
-                headers: {
-                  'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
-                },
+                timeout: 10000,
+                next: { revalidate: 60 },
               }
             );
+            
+            if (currentOIRes.ok) {
+              const currentOIData: any = await currentOIRes.json();
+              console.log('✅ 备用方案成功：获取到当前OI', currentOIData.openInterest);
+              // 返回当前OI，让客户端知道至少获取到了当前值
+              // 注意：由于只有当前值，无法计算变化，但至少可以显示当前OI
+              return NextResponse.json(
+                { 
+                  success: true, 
+                  data: [{
+                    openInterest: currentOIData.openInterest,
+                    sumOpenInterest: currentOIData.openInterest,
+                    timestamp: Date.now(),
+                  }],
+                  note: 'Only current OI available, historical data blocked (451)',
+                },
+                {
+                  headers: {
+                    'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+                    'Access-Control-Allow-Origin': '*',
+                  },
+                }
+              );
+            } else {
+              console.log('❌ 备用方案也失败:', currentOIRes.status);
+            }
+          } catch (e: any) {
+            console.log('❌ 备用方案异常:', e.message);
           }
         }
         

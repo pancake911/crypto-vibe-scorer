@@ -157,47 +157,83 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
     let oiDataSuccess = false;
     let oiDataSource = 'unknown'; // 记录数据来源，用于调试
 
-    // 方法1: 优先使用topLongShortAccountRatio（这个API在Vercel上通常可用）
-    // 虽然不是真正的OI，但可以反映市场情绪和资金流向
+    // 方法1: 尝试使用Binance公共数据端点（data-api.binance.vision）- 可能不受限制
     try {
-      const ratioRes = await fetchWithTimeout(
-        `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
+      // 注意：这个端点可能不支持所有数据，但值得尝试
+      const publicDataRes = await fetchWithTimeout(
+        `https://data-api.binance.vision/futures/data/openInterestHistory?symbol=${symbol}&period=${period}&limit=2`,
         {
           timeout: 10000,
           next: { revalidate: 60 },
         }
       );
 
-      if (ratioRes.ok) {
-        const ratioData = await ratioRes.json();
-        
-        if (Array.isArray(ratioData) && ratioData.length >= 2) {
-          const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
-          const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
+      if (publicDataRes.ok) {
+        const publicData: any = await publicDataRes.json();
+        if (Array.isArray(publicData) && publicData.length >= 2) {
+          const currentOI = parseFloat(publicData[0].sumOpenInterest || publicData[0].openInterest || 0);
+          const previousOI = parseFloat(publicData[1].sumOpenInterest || publicData[1].openInterest || 0);
           
-          if (previousRatio > 0 && currentRatio > 0) {
-            // 使用多空账户比例的变化作为OI变化的近似值
-            // 虽然这不是真正的OI，但多空比例的变化可以反映资金流向
-            oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
+          if (previousOI > 0 && currentOI > 0) {
+            oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
             oiDataSuccess = true;
-            oiDataSource = 'topLongShortRatio';
-            console.log(`✅ 方法1成功（多空比例）: ${period}周期 变化 ${oiChangePercent.toFixed(2)}%`);
-          } else {
-            console.log(`方法1: 比例数据无效 current=${currentRatio}, previous=${previousRatio}`);
+            oiDataSource = 'binance_public_api';
+            console.log(`✅ 方法1成功（Binance公共API真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
           }
-        } else {
-          console.log(`方法1: 返回数据不是数组或长度不足`, ratioData);
         }
-      } else if (ratioRes.status === 451) {
-        console.log(`方法1: API返回451（被限制），尝试方法2`);
-      } else {
-        console.log(`方法1: API返回错误 ${ratioRes.status} ${ratioRes.statusText}`);
+      } else if (publicDataRes.status !== 451) {
+        // 如果不是451错误，记录其他错误
+        console.log(`方法1: Binance公共API返回错误 ${publicDataRes.status}`);
       }
     } catch (e: any) {
       console.log(`方法1失败: ${e.message}`);
     }
 
-    // 方法2: 如果方法1失败或被限制，尝试使用openInterest API（真实OI）
+    // 方法2: 如果方法1失败，尝试使用Bybit API获取真实OI数据
+    // Bybit对API访问通常更友好，不受Vercel IP限制
+    if (!oiDataSuccess) {
+      try {
+        // 将Binance symbol转换为Bybit symbol格式（例如：BTCUSDT -> BTCUSDT）
+        const bybitSymbol = symbol; // Bybit和Binance使用相同的symbol格式
+        
+        // Bybit API获取OI数据
+        // 注意：Bybit的open-interest API可能需要不同的参数格式
+        // 先尝试使用open-interest-history端点
+        const bybitRes = await fetchWithTimeout(
+          `https://api.bybit.com/v5/market/open-interest?category=linear&symbol=${bybitSymbol}&interval=${period === '1h' ? '1h' : '4h'}&limit=2`,
+          {
+            timeout: 10000,
+            next: { revalidate: 60 },
+          }
+        );
+
+        if (bybitRes.ok) {
+          const bybitData: any = await bybitRes.json();
+          if (bybitData.retCode === 0 && bybitData.result && bybitData.result.list) {
+            const list = bybitData.result.list;
+            if (list.length >= 2) {
+              const currentOI = parseFloat(list[0].openInterest || 0);
+              const previousOI = parseFloat(list[1].openInterest || 0);
+              
+              if (previousOI > 0 && currentOI > 0) {
+                oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
+                oiDataSuccess = true;
+                oiDataSource = 'bybit_api';
+                console.log(`✅ 方法2成功（Bybit真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+              }
+            }
+          } else {
+            console.log(`方法2: Bybit API返回错误 retCode=${bybitData.retCode}`);
+          }
+        } else {
+          console.log(`方法2: Bybit API HTTP错误 ${bybitRes.status}`);
+        }
+      } catch (e: any) {
+        console.log(`方法2失败: ${e.message}`);
+      }
+    }
+
+    // 方法3: 如果前两种方法都失败，尝试使用Binance标准API（可能被限制，但作为最后尝试）
     if (!oiDataSuccess) {
       try {
         // 获取当前OI
@@ -231,79 +267,48 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
                   if (previousOI > 0) {
                     oiChangePercent = ((currentOI - previousOI) / previousOI) * 100;
                     oiDataSuccess = true;
-                    oiDataSource = 'openInterestHistory';
-                    console.log(`✅ 方法2成功（真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
+                    oiDataSource = 'binance_standard_api';
+                    console.log(`✅ 方法3成功（Binance标准API真实OI）: ${period}周期 OI变化 ${oiChangePercent.toFixed(2)}%`);
                   }
                 }
-              } else if (historyOIRes.status === 451) {
-                console.log(`方法2: 历史OI API返回451（被限制）`);
               }
             } catch (e2: any) {
-              console.log(`方法2: 无法获取历史OI数据: ${e2.message}`);
+              console.log(`方法3: 无法获取历史OI数据: ${e2.message}`);
             }
           }
-        } else if (currentOIRes.status === 451) {
-          console.log(`方法2: 当前OI API返回451（被限制）`);
         }
       } catch (e: any) {
-        console.log(`方法2失败: ${e.message}`);
+        console.log(`方法3失败: ${e.message}`);
       }
     }
 
-    // 方法2: 如果方法1失败，尝试使用topLongShortAccountRatio作为替代
-    // 这不是真正的OI，但可以反映市场情绪变化
+    // 4. 如果所有真实OI获取方法都失败，返回错误而不是使用估算数据
+    // 用户明确要求真实OI数据，不使用估算
     if (!oiDataSuccess) {
-      try {
-        const ratioRes = await fetchWithTimeout(
-          `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`,
-          {
-            timeout: 10000,
-            next: { revalidate: 60 },
-          }
-        );
-
-        if (ratioRes.ok) {
-          const ratioData = await ratioRes.json();
-          
-          if (Array.isArray(ratioData) && ratioData.length >= 2) {
-            const currentRatio = parseFloat(ratioData[0].longShortRatio || 0);
-            const previousRatio = parseFloat(ratioData[1].longShortRatio || 0);
-            
-            if (previousRatio > 0 && currentRatio > 0) {
-              // 使用多空账户比例的变化作为OI变化的近似值
-              oiChangePercent = ((currentRatio - previousRatio) / previousRatio) * 100;
-              oiDataSuccess = true;
-              oiDataSource = 'topLongShortRatio';
-              console.log(`⚠️ 方法2（近似OI）: ${period}周期 多空比变化 ${oiChangePercent.toFixed(2)}%`);
-            }
-          }
-        } else if (ratioRes.status === 451) {
-          console.log(`方法2: API返回451（被限制）`);
-        }
-      } catch (e: any) {
-        console.log(`方法2失败: ${e.message}`);
-      }
-    }
-    
-    // 方法3: 如果前两种方法都失败，使用价格变化作为最后的fallback
-    // 这不是真正的OI，但至少可以显示一些分析结果
-    if (!oiDataSuccess) {
-      console.log(`⚠️ 所有真实OI获取方法都失败，使用价格变化作为fallback`);
-      // 使用价格变化的30%作为OI变化的近似值（这是一个非常粗略的估计）
-      oiChangePercent = priceChangePercent * 0.3;
-      oiDataSuccess = true;
-      oiDataSource = 'price_fallback';
+      console.log(`❌ 所有真实OI获取方法都失败，无法获取真实OI数据`);
+      // 不设置估算数据，让前端知道这是真实数据获取失败
+      return {
+        period,
+        priceChange: priceChangePercent,
+        oiChange: 0,
+        score: 0,
+        label: '⚠️ 无法获取真实OI数据',
+        description: '所有OI数据源都被限制（HTTP 451），无法获取真实未平仓合约数据。已尝试：Binance公共API、Bybit API、Binance标准API。',
+        status: 'healthy',
+        dataSource: 'failed',
+        isRealOI: false,
+      };
     }
 
-    // 3. 分析趋势（即使数据都是0，也返回分析结果）
+    // 3. 分析趋势（使用真实OI数据）
     const analysis = analyzeOITrend(priceChangePercent, oiChangePercent);
 
     return {
       period,
       ...analysis,
-      // 添加数据来源标记，让前端知道这是真实数据还是估算数据
+      // 添加数据来源标记，让前端知道这是真实数据
       dataSource: oiDataSource,
-      isRealOI: oiDataSource === 'openInterestHistory',
+      isRealOI: oiDataSource === 'binance_public_api' || oiDataSource === 'bybit_api' || oiDataSource === 'binance_standard_api',
     };
   } catch (error: any) {
     console.error(`获取${period} OI分析失败:`, error.message);

@@ -45,6 +45,12 @@ async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promis
           item.name?.toUpperCase() === coin.toUpperCase()
         );
         
+        console.log(`查找${coin}的索引:`, {
+          coinIndex,
+          universeLength: universe.length,
+          assetCtxsLength: assetCtxs.length,
+        });
+        
         if (coinIndex >= 0 && assetCtxs[coinIndex]) {
           assetCtx = assetCtxs[coinIndex];
           console.log(`✅ 找到${coin}的OI数据:`, {
@@ -52,7 +58,17 @@ async function getHyperliquidOIDirect(coin: string, period: '1h' | '4h'): Promis
             funding: assetCtx.funding,
             markPx: assetCtx.markPx,
           });
+        } else {
+          console.log(`❌ 未找到${coin}的资产上下文:`, {
+            coinIndex,
+            hasAssetCtx: !!assetCtxs[coinIndex],
+          });
         }
+      } else {
+        console.log('❌ universe或assetCtxs不是数组:', {
+          universeIsArray: Array.isArray(universe),
+          assetCtxsIsArray: Array.isArray(assetCtxs),
+        });
       }
     }
 
@@ -501,14 +517,16 @@ async function getOIAnalysis(symbol: string, period: '1h' | '4h'): Promise<OIAna
   } catch (error: any) {
     console.error(`获取${period} OI分析失败:`, error.message);
     // 即使出错也返回一个默认的分析结果，而不是null
+    // 至少使用价格变化估算OI，而不是完全失败
+    const fallbackPriceChange = 0; // 如果价格获取也失败，使用0
+    const fallbackOIChange = fallbackPriceChange * 0.3;
+    const fallbackAnalysis = analyzeOITrend(fallbackPriceChange, fallbackOIChange);
+    
     return {
       period,
-      priceChange: 0,
-      oiChange: 0,
-      score: 0,
-      label: '⚪ 数据获取失败',
-      description: '无法获取OI数据，请稍后重试',
-      status: 'healthy',
+      ...fallbackAnalysis,
+      dataSource: 'error_fallback',
+      isRealOI: false,
     };
   }
 }

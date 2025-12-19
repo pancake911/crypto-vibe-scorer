@@ -5,9 +5,11 @@ export interface ScoringInputs {
   fundingRate: number; // 资金费率（百分比）
   longShortRatio: number | null; // 多空持仓比
   fearGreedIndex: number; // 恐惧贪婪指数 0-100
+  oiScore1h?: number; // OI 1小时分析得分（可选）
+  oiScore4h?: number; // OI 4小时分析得分（可选）
   
   // 用户手动输入
-  oiPattern: string; // OI形态
+  oiPattern: string; // OI形态（已废弃，保留兼容性）
   etfFlow: number; // ETF资金流向（亿美元）
   orderBookFeatures: string[]; // 盘口挂单特征
 }
@@ -40,28 +42,35 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
     breakdown.push({
       category: '资金费率',
       score: -20,
-      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% > 0.10%，极度危险，建议减仓`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% > 0.10%，极端正费率，牛市尾声标志，开始无脑减仓`,
     });
   } else if (fundingRatePercent >= 0.07 && fundingRatePercent <= 0.09) {
     totalScore -= 10;
     breakdown.push({
       category: '资金费率',
       score: -10,
-      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0.07%-0.09%之间，预警`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0.07%-0.09%之间，高烧预警，逐步减仓，只留底仓`,
+    });
+  } else if (fundingRatePercent >= 0.03 && fundingRatePercent <= 0.06) {
+    // 正常偏高，可继续持有多单但不开新仓
+    breakdown.push({
+      category: '资金费率',
+      score: 0,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0.03%-0.06%之间，正常偏高，可继续持有多单但不开新仓`,
     });
   } else if (fundingRatePercent >= 0 && fundingRatePercent <= 0.02) {
     totalScore += 10;
     breakdown.push({
       category: '资金费率',
       score: +10,
-      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0%-0.02%之间，健康`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在0%-0.02%之间，健康区间，最舒服的持仓阶段`,
     });
   } else if (fundingRatePercent >= -0.04 && fundingRatePercent <= -0.01) {
     totalScore += 20;
     breakdown.push({
       category: '资金费率',
       score: +20,
-      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在-0.04%到-0.01%之间，最佳加仓时机`,
+      reason: `资金费率 ${fundingRatePercent.toFixed(5)}% 在-0.01%到-0.04%之间，轻度负费率，最佳加仓区间（收钱还赚钱）`,
     });
   } else if (fundingRatePercent < -0.05) {
     totalScore += 30;
@@ -81,19 +90,28 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
   // 2. 多空持仓比评分
   if (inputs.longShortRatio !== null) {
     const ratio = inputs.longShortRatio;
-    if (ratio > 2.5) {
+    if (ratio >= 3.0) {
+      // 顶级账户比 ≥ 3.0 → 必炸多头，立即反手空
+      totalScore -= 30;
+      breakdown.push({
+        category: '多空持仓比',
+        score: -30,
+        reason: `多空比 ${ratio.toFixed(2)} ≥ 3.0，必炸多头，立即反手空`,
+      });
+    } else if (ratio >= 2.5) {
+      // 顶级账户比 ≥ 2.5 → 至少减仓70%，准备跑
       totalScore -= 20;
       breakdown.push({
         category: '多空持仓比',
         score: -20,
-        reason: `多空比 ${ratio.toFixed(2)} > 2.5，多头拥挤，建议跑`,
+        reason: `多空比 ${ratio.toFixed(2)} ≥ 2.5，至少减仓70%，准备跑`,
       });
-    } else if (ratio < 0.4) {
+    } else if (ratio <= 0.4) {
       totalScore += 20;
       breakdown.push({
         category: '多空持仓比',
         score: +20,
-        reason: `多空比 ${ratio.toFixed(2)} < 0.4，空头拥挤，做多机会`,
+        reason: `多空比 ${ratio.toFixed(2)} ≤ 0.4，空头必炸，满仓多单杠杆拉满`,
       });
     } else {
       breakdown.push({
@@ -113,18 +131,43 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
   // 3. 恐惧贪婪指数评分
   const fng = inputs.fearGreedIndex;
   if (fng > 90) {
+    // 极端贪婪 >90 → 减仓50%+ 或反手空（牛市尾声）
     totalScore -= 20;
     breakdown.push({
       category: '恐惧贪婪指数',
       score: -20,
-      reason: `恐惧贪婪指数 ${fng} > 90，极度贪婪，建议卖出`,
+      reason: `恐惧贪婪指数 ${fng} > 90，极端贪婪，全网看多信号，减仓50%+ 或反手空（牛市尾声）`,
+    });
+  } else if (fng > 75) {
+    // 贪婪 >75 → 高风险预警，逐步减仓，只留底仓
+    totalScore -= 10;
+    breakdown.push({
+      category: '恐惧贪婪指数',
+      score: -10,
+      reason: `恐惧贪婪指数 ${fng} > 75，贪婪，高风险预警，逐步减仓，只留底仓`,
+    });
+  } else if (fng >= 40 && fng <= 60) {
+    // 中性 40~60 → 健康区间，可持仓但别追高
+    breakdown.push({
+      category: '恐惧贪婪指数',
+      score: 0,
+      reason: `恐惧贪婪指数 ${fng}，中性，健康区间，可持仓但别追高`,
     });
   } else if (fng < 10) {
+    // 极端恐惧 <10 → 无脑定投/满仓多，闭眼拿住（熊市底）
     totalScore += 30;
     breakdown.push({
       category: '恐惧贪婪指数',
       score: +30,
-      reason: `恐惧贪婪指数 ${fng} < 10，极度恐惧，买入机会`,
+      reason: `恐惧贪婪指数 ${fng} < 10，极端恐惧，无脑定投/满仓多，闭眼拿住（熊市底）`,
+    });
+  } else if (fng < 20) {
+    // 恐惧 <20 → 轻度底信号，加仓20~30%
+    totalScore += 15;
+    breakdown.push({
+      category: '恐惧贪婪指数',
+      score: +15,
+      reason: `恐惧贪婪指数 ${fng} < 20，恐惧，轻度底信号，加仓20~30%`,
     });
   } else {
     breakdown.push({
@@ -134,9 +177,37 @@ export function calculateScore(inputs: ScoringInputs): ScoringResult {
     });
   }
 
-  // 4. OI形态评分（已移除手动输入，现在由自动OI分析提供）
-  // OI分析现在在单独的模块中显示，不再计入总分
-  // 如果需要将OI分析结果计入总分，可以在前端调用calculateScore时传入OI分析得分
+  // 4. OI趋势分析评分（自动获取，基于1小时和4小时OI分析）
+  // 使用1小时和4小时OI分析得分的平均值，如果只有一个周期有数据则使用该周期
+  let oiScore = 0;
+  if (inputs.oiScore1h !== undefined && inputs.oiScore4h !== undefined) {
+    // 两个周期都有数据，取平均值
+    oiScore = Math.round((inputs.oiScore1h + inputs.oiScore4h) / 2);
+  } else if (inputs.oiScore1h !== undefined) {
+    oiScore = inputs.oiScore1h;
+  } else if (inputs.oiScore4h !== undefined) {
+    oiScore = inputs.oiScore4h;
+  }
+  
+  if (oiScore !== 0) {
+    totalScore += oiScore;
+    const oiLabel = inputs.oiScore1h !== undefined && inputs.oiScore4h !== undefined
+      ? 'OI趋势分析（1h+4h平均）'
+      : inputs.oiScore1h !== undefined
+      ? 'OI趋势分析（1h）'
+      : 'OI趋势分析（4h）';
+    breakdown.push({
+      category: 'OI趋势分析',
+      score: oiScore,
+      reason: `${oiLabel}得分: ${oiScore > 0 ? '+' : ''}${oiScore}分`,
+    });
+  } else {
+    breakdown.push({
+      category: 'OI趋势分析',
+      score: 0,
+      reason: 'OI分析数据不可用',
+    });
+  }
 
   // 5. ETF资金流向评分
   const etfFlow = inputs.etfFlow;

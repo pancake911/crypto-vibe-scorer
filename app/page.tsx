@@ -353,10 +353,24 @@ export default function Home() {
     // 从盘口雷达历史记录中自动提取特征（使用最近1分钟的数据）
     const autoOrderBookFeatures = extractOrderBookFeatures(orderBookHistory, 60000);
 
+    // 计算OI分析得分（如果有数据）
+    let oiScore1h: number | undefined = undefined;
+    let oiScore4h: number | undefined = undefined;
+    if (oiAnalysis) {
+      if (oiAnalysis['1h'] && oiAnalysis['1h'].score !== undefined) {
+        oiScore1h = oiAnalysis['1h'].score;
+      }
+      if (oiAnalysis['4h'] && oiAnalysis['4h'].score !== undefined) {
+        oiScore4h = oiAnalysis['4h'].score;
+      }
+    }
+
     const inputs: ScoringInputs = {
       fundingRate,
       longShortRatio,
       fearGreedIndex,
+      oiScore1h,
+      oiScore4h,
       oiPattern: 'none', // OI现在由自动分析提供，手动输入已移除
       etfFlow,
       orderBookFeatures: autoOrderBookFeatures, // 使用自动提取的盘口特征
